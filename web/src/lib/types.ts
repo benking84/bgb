@@ -57,7 +57,6 @@ export type Settings = {
   service_account_secret: string;
   service_account_email: string;
   oauth_secret: string;
-  encryption_key_secret: string;
   gcs_bucket: string;
   gcs_prefix: string;
   block_size: number;

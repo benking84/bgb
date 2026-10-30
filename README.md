@@ -1,10 +1,10 @@
 # bgb
 
-bgb ("baby got back") backs up Google Workspace. It keeps Duplicati's block dedup, encrypted volumes, versioned retention, restore, and integrity checks, and drops everything that is not needed for Workspace data on Google Cloud.
+bgb ("baby got back") backs up Google Workspace. Files are split into fixed-size blocks, identical blocks are stored once, volumes are compressed, and each object and restored file is checked with SHA-256. Versions follow a retention policy. Restore rebuilds a file from its block list.
 
-Gmail and Google Drive (including shared drives) are the sources that matter. Contacts is included on the same plugin interface. Google Keep is registered and refused, because Keep has no supported Workspace API. Backup bytes go to Cloud Storage. Job config, run history, and the block index go to Firestore. Credentials go to Secret Manager. The only deployment target is Cloud Run: a service for the web UI and API, and a job that Cloud Scheduler starts for backup runs.
+Gmail and Google Drive (including shared drives) are the sources that matter. Contacts uses the same plugin interface. Google Keep is registered and refused, because Keep has no supported Workspace API. Backup bytes go to Cloud Storage. Job config, run history, and the block index go to Firestore. Workspace credentials go to Secret Manager. Cloud Storage and Firestore encrypt data at rest. There is no application-level encryption key.
 
-The cut list against Duplicati is in [REVIEW.md](REVIEW.md).
+The design is described in [REVIEW.md](REVIEW.md).
 
 ## Run it locally
 
@@ -29,9 +29,7 @@ python3 -m bgb serve --host 127.0.0.1 --port 8741
 
 Open http://127.0.0.1:8742. The UI talks to the API at `http://127.0.0.1:8741` (see `web/.env.development`).
 
-With no Google credentials, choose **Load the Northwind sample**. That job uses fixture mail, Drive, and contacts, and still runs the real engine: dedup, encrypted volumes under `data/volumes`, and a JSON index at `data/index.json`. The first run stores the shared handbook once. The second run uploads no new blocks.
-
-An encryption key is generated into `data/secrets/` the first time a backup runs. Do not lose it. Volumes cannot be decrypted without it.
+With no Google credentials, choose **Load the Northwind sample**. That job uses fixture mail, Drive, and contacts, and still runs the real engine: dedup, compressed volumes under `data/volumes`, and a JSON index at `data/index.json`. The first run stores the shared handbook once. The second run uploads no new blocks.
 
 ```bash
 python3 -m bgb run --job-id northwind
@@ -57,8 +55,8 @@ Set the admin email in Settings. Backups impersonate each selected user. Shared 
 
 Two ways to hold the service account:
 
-- **Keyless (preferred on Cloud Run).** Use the Cloud Run runtime service account itself. Grant it `roles/iam.serviceAccountTokenCreator` on itself (the Terraform does this). Put its email in Settings → service account email. Domain-wide delegation must authorize that account's client id.
-- **JSON key.** Store the key as a Secret Manager version named `bgb-workspace-sa` (or the name you set). The key is used only to mint delegated tokens. Prefer keyless so the key does not exist.
+- **Keyless (preferred on Cloud Run).** Use the Cloud Run runtime service account itself. Terraform grants it `roles/iam.serviceAccountTokenCreator` on itself. Put its email in Settings → service account email. Domain-wide delegation must authorize that account's client id.
+- **JSON key.** Store the key as a Secret Manager version of `bgb-workspace-sa` (Terraform creates the secret). The key is used only to mint delegated tokens.
 
 OAuth is for a single user, without admin delegation. Create an OAuth client, then:
 
@@ -70,31 +68,15 @@ python3 -m bgb oauth-exchange --client-id CLIENT_ID --client-secret CLIENT_SECRE
 
 Set auth mode to OAuth and list that one user on the job. Scopes are Gmail, Drive, and Contacts read-only. There is no Directory scope, so "every user" is rejected.
 
-Store the encryption key as 64 hex characters:
+## Deploy
+
+Create the GCP project yourself. Terraform does not create it. Build a container image that Cloud Run can pull, then apply `terraform/`. That is the only deployment path. It enables APIs and creates the bucket, Firestore, Secret Manager secret, IAM, Cloud Run service, Cloud Run job, and Cloud Scheduler job.
 
 ```bash
-openssl rand -hex 32 | gcloud secrets versions add bgb-encryption-key --data-file=-
-```
-
-## Cloud Run
-
-The container serves the API and the exported UI on `$PORT` (8080 on Cloud Run). The backup job uses the same image with `python -m bgb run-due`.
-
-Terraform in `terraform/` creates:
-
-- the Firestore database in Native mode (the `(default)` database)
-- a Cloud Storage bucket with public access prevented
-- Secret Manager shells for the encryption key and the optional Workspace JSON key (you add the versions)
-- a runtime service account and a scheduler service account
-- a Cloud Run service and a Cloud Run job
-- a Cloud Scheduler job every 15 minutes that starts `run-due`
-
-```bash
-export PROJECT=your-project REGION=us-central1 BUCKET=your-unique-bucket
+export PROJECT=your-project REGION=us-central1
+export BUCKET=your-unique-bucket
 export IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/bgb/bgb:latest
-gcloud services enable artifactregistry.googleapis.com cloudbuild.googleapis.com
-gcloud artifacts repositories create bgb --repository-format=docker --location=$REGION
-gcloud builds submit --tag "$IMAGE"
+
 terraform -chdir=terraform init
 terraform -chdir=terraform apply \
   -var project_id=$PROJECT \
@@ -103,13 +85,38 @@ terraform -chdir=terraform apply \
   -var image=$IMAGE
 ```
 
-`scripts/deploy.sh` runs those steps. The Firestore `(default)` database can only be created once per project. If it already exists, import it before apply:
+The image value is an input. The container listens on `$PORT` and serves the API and the exported UI. The backup job uses the same image and runs `python -m bgb run-due`. Cloud Scheduler calls that job every 15 minutes. "Run now" in the UI starts the same job.
+
+Optional Cloud KMS key on the bucket, off unless you set it:
+
+```bash
+terraform -chdir=terraform apply \
+  -var project_id=$PROJECT \
+  -var region=$REGION \
+  -var bucket_name=$BUCKET \
+  -var image=$IMAGE \
+  -var kms_key_name=projects/$PROJECT/locations/$REGION/keyRings/RING/cryptoKeys/KEY
+```
+
+When `kms_key_name` is empty, the bucket uses Google-managed encryption. When it is set, Terraform enables the Cloud KMS API and grants the Cloud Storage service agent and the runtime service account `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key.
+
+The Firestore `(default)` database can only be created once per project. If it already exists, import it before apply:
 
 ```bash
 terraform -chdir=terraform import google_firestore_database.default projects/$PROJECT/databases/'(default)'
 ```
 
-After apply, add the encryption key version, authorize domain-wide delegation, and open the service URL. The service requires authentication unless `allow_unauthenticated=true`. Manual runs from the UI call the Cloud Run job (`BGB_CLOUD_RUN_JOB`) instead of holding the HTTP request open.
+After apply, authorize domain-wide delegation for the runtime service account and open the service URL. The service requires authentication unless `allow_unauthenticated=true`. If you use a JSON key instead of keyless delegation, add it as a version of `bgb-workspace-sa`.
+
+| Variable | Meaning |
+| --- | --- |
+| `project_id` | Existing GCP project |
+| `region` | Cloud Run, bucket, and Scheduler region (default `us-central1`) |
+| `bucket_name` | Globally unique Cloud Storage bucket |
+| `image` | Container image Cloud Run pulls |
+| `firestore_location` | Firestore location (default `nam5`) |
+| `kms_key_name` | Optional CMEK key for the bucket |
+| `allow_unauthenticated` | When true, the UI service is public |
 
 Local overrides, if you point a machine at a real project:
 
@@ -126,7 +133,7 @@ Local overrides, if you point a machine at a real project:
 | `BGB_API_TOKEN` | optional bearer token |
 | `PORT` | listen port |
 
-Volumes are buffered in memory. Keep the volume size at or under 128 MiB (the default is 50 MiB, Duplicati's remote-volume size). Block size defaults to 100 KiB.
+Volumes are buffered in memory. Keep the volume size at or under 128 MiB. The default is 50 MiB. Block size defaults to 100 KiB.
 
 ## Tests
 
@@ -134,4 +141,4 @@ Volumes are buffered in memory. Keep the volume size at or under 128 MiB (the de
 python3 -m pytest
 ```
 
-The suite covers dedup, encryption, retention (including the smart bucket policy), compaction, restore, verify, index rebuild, Gmail history (including an expired history id), Drive export and shared drives, Contacts sync, and the HTTP API against the sample workspace. Google APIs are mocked. Firestore and Cloud Storage are not integration-tested here. The local JSON index implements the same operations the engine uses.
+The suite covers dedup, compression, retention (including the smart bucket policy), compaction, restore, verify, index rebuild, Gmail history (including an expired history id), Drive export and shared drives, Contacts sync, and the HTTP API against the sample workspace. Google APIs are mocked. Firestore and Cloud Storage are not integration-tested here. The local JSON index implements the same operations the engine uses.

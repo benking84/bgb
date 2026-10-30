@@ -21,7 +21,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "bgb — Workspace backup",
-  description: "Block-level backup for Gmail and Google Drive, stored encrypted in Cloud Storage.",
+  description: "Block-level backup for Gmail and Google Drive, stored in Cloud Storage.",
 };
 
 export default function RootLayout({

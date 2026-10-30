@@ -293,7 +293,7 @@ export function JobView() {
                 <span>New blocks: {String(run.stats.blocks_new ?? "—")}</span>
                 <span>Reused blocks: {String(run.stats.blocks_reused ?? "—")}</span>
                 <span>Logical bytes: {formatBytes(Number(run.stats.bytes ?? 0))}</span>
-                <span>Uploaded ciphertext: {formatBytes(Number(run.stats.stored_bytes ?? 0))}</span>
+                <span>Uploaded bytes: {formatBytes(Number(run.stats.stored_bytes ?? 0))}</span>
               </CardContent>
             </Card>
           ))}
@@ -305,7 +305,7 @@ export function JobView() {
           <DialogHeader>
             <DialogTitle>Delete {job.name}?</DialogTitle>
             <DialogDescription>
-              This removes the job, the index, and the encrypted volumes for this job. It does not
+              This removes the job, the index, and the volumes for this job. It does not
               touch the live Workspace data.
             </DialogDescription>
           </DialogHeader>

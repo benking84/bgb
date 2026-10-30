@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import logging
-import os
 import random
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from bgb.crypto import decrypt, encrypt, parse_key
-from bgb.errors import BgbError, ConfigError, Conflict, IntegrityError, NotFound, SecretNotFound
+from bgb.errors import BgbError, ConfigError, Conflict, IntegrityError, NotFound
 from bgb.models import BlockRef, FileEntry, FileSet, Job, Run, Settings, SourceObject, VolumeRef
 from bgb.retention import Stamp, filesets_to_delete
-from bgb.secretstore import env_flag
 from bgb.util import now_iso, parse_time, safe_path
 from bgb.volume import (
     VolumeWriter,
@@ -28,20 +25,6 @@ from bgb.volume import (
 log = logging.getLogger("bgb.engine")
 
 
-def load_encryption_key(settings: Settings, secrets) -> bytes:
-    try:
-        raw = secrets.get(settings.encryption_key_secret)
-    except SecretNotFound:
-        if env_flag("BGB_USE_GCP"):
-            raise ConfigError(
-                f"encryption key secret {settings.encryption_key_secret} is missing in Secret Manager"
-            )
-        key = os.urandom(32)
-        secrets.put(settings.encryption_key_secret, key.hex().encode())
-        return key
-    return parse_key(raw)
-
-
 def _object_name(prefix: str, job_id: str, kind: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     token = uuid.uuid4().hex[:8]
@@ -51,10 +34,9 @@ def _object_name(prefix: str, job_id: str, kind: str) -> str:
 
 
 class Engine:
-    def __init__(self, index, volumes, secrets, sources_for, *, prefix: str = "bgb"):
+    def __init__(self, index, volumes, sources_for, *, prefix: str = "bgb"):
         self.index = index
         self.volumes = volumes
-        self.secrets = secrets
         self.sources_for = sources_for
         self.prefix = prefix
         self._locks: dict[str, threading.Lock] = {}
@@ -67,9 +49,6 @@ class Engine:
 
     def _settings(self) -> Settings:
         return self.index.get_settings()
-
-    def _key(self) -> bytes:
-        return load_encryption_key(self._settings(), self.secrets)
 
     def _prefix(self, job_id: str) -> str:
         head = (self._settings().gcs_prefix or self.prefix).strip("/")
@@ -93,7 +72,6 @@ class Engine:
             raise ConfigError("block size must be at least 16 bytes")
         if volume_size < block_size:
             raise ConfigError("volume size must be at least the block size")
-        key = self._key()
         if run_id:
             run = self.index.get_run(run_id)
         else:
@@ -140,14 +118,14 @@ class Engine:
             writer = VolumeWriter(volume_size)
             local_new: set[str] = set()
             entries, new_state = self._collect(
-                job, sources, previous, block_size, key, writer, local_new, stats, run
+                job, sources, previous, block_size, writer, local_new, stats, run
             )
-            self._flush(job_id, key, writer, stats)
+            self._flush(job_id, writer, stats)
             stats["files"] = len(entries)
             run.phase = "fileset"
             run.stats = stats
             self.index.update_run(run)
-            self._write_fileset(job, entries, key, stats)
+            self._write_fileset(job, entries, stats)
             job.source_state = new_state
             job.updated_at = now_iso()
             self.index.upsert_job(job)
@@ -157,7 +135,7 @@ class Engine:
             stats["filesets_removed"] = len(removed)
             run.phase = "compact"
             self.index.update_run(run)
-            stats.update(self.compact(job_id, key))
+            stats.update(self.compact(job_id))
             run.phase = "verify"
             run.stats = stats
             self.index.update_run(run)
@@ -181,7 +159,7 @@ class Engine:
                 self.index.flush()
         return run
 
-    def _collect(self, job, sources, previous, block_size, key, writer, local_new, stats, run):
+    def _collect(self, job, sources, previous, block_size, writer, local_new, stats, run):
         prefixes = tuple(source.id_prefix for source in sources)
         by_id = {entry.source_id: entry for entry in previous}
         for entry in previous:
@@ -205,7 +183,7 @@ class Engine:
                             continue
                         seen.add(obj.source_id)
                         entries.append(
-                            self._ingest(job.id, obj, prev_scope.get(obj.source_id), block_size, key, writer, local_new, stats, run)
+                            self._ingest(job.id, obj, prev_scope.get(obj.source_id), block_size, writer, local_new, stats, run)
                         )
                     stats["files_deleted"] += sum(1 for sid in prev_scope if sid not in seen)
                 else:
@@ -217,19 +195,19 @@ class Engine:
                             continue
                         if sid in upserts:
                             entries.append(
-                                self._ingest(job.id, upserts.pop(sid), old, block_size, key, writer, local_new, stats, run)
+                                self._ingest(job.id, upserts.pop(sid), old, block_size, writer, local_new, stats, run)
                             )
                         else:
                             entries.append(old)
                             stats["files_unchanged"] += 1
                     for obj in upserts.values():
-                        entries.append(self._ingest(job.id, obj, None, block_size, key, writer, local_new, stats, run))
+                        entries.append(self._ingest(job.id, obj, None, block_size, writer, local_new, stats, run))
             for sid, old in owned.items():
                 if old.scope not in seen_scopes:
                     stats["files_deleted"] += 1
         return entries, new_state
 
-    def _ingest(self, job_id, obj: SourceObject, old: FileEntry | None, block_size, key, writer, local_new, stats, run) -> FileEntry:
+    def _ingest(self, job_id, obj: SourceObject, old: FileEntry | None, block_size, writer, local_new, stats, run) -> FileEntry:
         try:
             safe_path(obj.path)
         except ValueError as exc:
@@ -271,7 +249,7 @@ class Engine:
                 local_new.add(block_hash)
                 stats["blocks_new"] += 1
                 if writer.full():
-                    self._flush(job_id, key, writer, stats)
+                    self._flush(job_id, writer, stats)
         stats["files_read"] += 1
         stats["bytes"] += size
         if stats["files_read"] % 20 == 0:
@@ -291,22 +269,22 @@ class Engine:
             metadata=dict(obj.metadata),
         )
 
-    def _flush(self, job_id: str, key: bytes, writer: VolumeWriter, stats: dict) -> None:
+    def _flush(self, job_id: str, writer: VolumeWriter, stats: dict) -> None:
         if not writer.pending():
             return
         pairs = writer.take()
-        volume = self._write_block_volume(job_id, key, pairs)
+        volume = self._write_block_volume(job_id, pairs)
         for block_hash, data in pairs:
             self.index.put_block(job_id, BlockRef(hash=block_hash, size=len(data), volume_id=volume.id))
         stats["volumes"] += 1
         stats["stored_bytes"] += volume.size
 
-    def _write_block_volume(self, job_id: str, key: bytes, pairs: list[tuple[str, bytes]]) -> VolumeRef:
+    def _write_block_volume(self, job_id: str, pairs: list[tuple[str, bytes]]) -> VolumeRef:
         prefix = self._settings().gcs_prefix or self.prefix
-        blob = encrypt(compress(encode_blocks(pairs)), key)
+        blob = compress(encode_blocks(pairs))
         name = _object_name(prefix, job_id, "dblock")
         self.volumes.put(name, blob)
-        index_blob = encrypt(compress(encode_index(name, pairs)), key)
+        index_blob = compress(encode_index(name, pairs))
         index_name = _object_name(prefix, job_id, "dindex")
         self.volumes.put(index_name, index_blob)
         created = now_iso()
@@ -336,7 +314,7 @@ class Engine:
         self.index.put_volume(job_id, index_volume)
         return block_volume
 
-    def _write_fileset(self, job: Job, entries: list[FileEntry], key: bytes, stats: dict) -> FileSet:
+    def _write_fileset(self, job: Job, entries: list[FileEntry], stats: dict) -> FileSet:
         fileset_id = uuid.uuid4().hex
         created = now_iso()
         body = []
@@ -350,7 +328,7 @@ class Engine:
             {"job_id": job.id, "fileset_id": fileset_id, "created_at": created},
             body,
         )
-        blob = encrypt(compress(plain), key)
+        blob = compress(plain)
         name = _object_name(self._settings().gcs_prefix or self.prefix, job.id, "dlist")
         self.volumes.put(name, blob)
         volume = VolumeRef(
@@ -394,8 +372,7 @@ class Engine:
             self.index.delete_fileset(job.id, fileset_id)
         return delete_ids
 
-    def compact(self, job_id: str, key: bytes | None = None) -> dict:
-        key = key or self._key()
+    def compact(self, job_id: str) -> dict:
         threshold = self._settings().compact_waste_threshold
         live: set[str] = set()
         for fileset in self.index.list_filesets(job_id):
@@ -413,9 +390,9 @@ class Engine:
                 if waste < threshold:
                     continue
             if live_blocks:
-                loaded = self._load_block_volume(job_id, volume.id, key)
+                loaded = self._load_block_volume(job_id, volume.id)
                 pairs = [(block.hash, loaded[block.hash]) for block in live_blocks]
-                replacement = self._write_block_volume(job_id, key, pairs)
+                replacement = self._write_block_volume(job_id, pairs)
                 for digest, data in pairs:
                     self.index.put_block(
                         job_id,
@@ -441,7 +418,6 @@ class Engine:
             self.index.delete_volume(job_id, other.id)
 
     def verify(self, job_id: str, *, full: bool = False, sample: int | None = None) -> dict:
-        key = self._key()
         issues: list[str] = []
         volumes = [row for row in self.index.list_volumes(job_id) if row.state == "available"]
         remote = set(self.volumes.list(self._prefix(job_id)))
@@ -463,7 +439,7 @@ class Engine:
                 issues.append(f"hash mismatch for {volume.name}")
                 continue
             try:
-                payload = decode_payload(decompress(decrypt(blob, key)))
+                payload = decode_payload(decompress(blob))
             except (IntegrityError, BgbError) as exc:
                 issues.append(f"{volume.name}: {exc}")
                 continue
@@ -495,15 +471,15 @@ class Engine:
 
     def read_file(self, job_id: str, fileset_id: str, path: str) -> tuple[bytes, FileEntry]:
         entry = self.index.get_entry(job_id, fileset_id, path)
-        return self._read_entry(job_id, entry, self._key(), {}), entry
+        return self._read_entry(job_id, entry, {}), entry
 
-    def _read_entry(self, job_id: str, entry: FileEntry, key: bytes, cache: dict) -> bytes:
+    def _read_entry(self, job_id: str, entry: FileEntry, cache: dict) -> bytes:
         hashes = self.index.get_blockset(job_id, entry.blockset_id)
         out = bytearray()
         for digest in hashes:
             block = self.index.get_block(job_id, digest)
             if block.volume_id not in cache:
-                cache[block.volume_id] = self._load_block_volume(job_id, block.volume_id, key)
+                cache[block.volume_id] = self._load_block_volume(job_id, block.volume_id)
             chunk = cache[block.volume_id].get(digest)
             if chunk is None:
                 raise IntegrityError(f"block {digest} is missing from its volume")
@@ -513,23 +489,22 @@ class Engine:
             raise IntegrityError(f"restored {entry.path} does not match its content hash")
         return data
 
-    def _load_block_volume(self, job_id: str, volume_id: str, key: bytes) -> dict[str, bytes]:
+    def _load_block_volume(self, job_id: str, volume_id: str) -> dict[str, bytes]:
         volume = self.index.get_volume(job_id, volume_id)
         blob = self.volumes.get(volume.name)
         if sha256_hex(blob) != volume.hash:
             raise IntegrityError(f"volume {volume.name} hash mismatch")
-        payload = decode_payload(decompress(decrypt(blob, key)))
+        payload = decode_payload(decompress(blob))
         if payload.type != "blocks":
             raise IntegrityError(f"{volume.name} is not a block volume")
         return payload.blocks
 
     def rebuild(self, job_id: str) -> dict:
-        key = self._key()
         names = self.volumes.list(self._prefix(job_id))
         decoded = []
         for name in names:
             blob = self.volumes.get(name)
-            payload = decode_payload(decompress(decrypt(blob, key)))
+            payload = decode_payload(decompress(blob))
             decoded.append((name, blob, payload))
         self.index.clear_backup_data(job_id)
         filesets = 0

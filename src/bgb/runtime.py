@@ -28,7 +28,6 @@ class Runtime:
         self.engine = Engine(
             index,
             volumes,
-            secrets,
             sources_for=lambda job, settings: build_sources(job, settings, secrets),
         )
 

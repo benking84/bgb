@@ -2,24 +2,21 @@ import hashlib
 
 import pytest
 
-from bgb.crypto import decrypt, encrypt
 from bgb.errors import IntegrityError, NotFound
 from bgb.index.memory import FileIndex
 from bgb.models import FileSet, VolumeRef
 from bgb.util import now_iso
-from bgb.volume import decode_payload, encode_blocks
+from bgb.volume import compress, decode_payload, decompress, encode_blocks
 from tests.helpers import BytesSource, job, make_engine
 
 
-def test_encrypt_roundtrip_and_tamper():
-    key = b"k" * 32
-    blob = encrypt(b"handbook", key)
-    assert decrypt(blob, key) == b"handbook"
-    assert encrypt(b"handbook", key) != blob
+def test_compress_roundtrip_and_tamper():
+    blob = compress(b"handbook")
+    assert decompress(blob) == b"handbook"
     flipped = bytearray(blob)
     flipped[-1] ^= 0x01
     with pytest.raises(IntegrityError):
-        decrypt(bytes(flipped), key)
+        decompress(bytes(flipped))
 
 
 def test_block_payload_detects_a_flipped_byte():

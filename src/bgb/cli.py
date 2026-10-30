@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> None:
     restore.add_argument("--path", required=True)
     restore.add_argument("--dest", required=True)
 
-    rebuild = sub.add_parser("rebuild", help="Rebuild the index from encrypted volumes")
+    rebuild = sub.add_parser("rebuild", help="Rebuild the index from stored volumes")
     rebuild.add_argument("--job-id", required=True)
 
     oauth = sub.add_parser("oauth-url", help="Print a Google OAuth consent URL for a single user")

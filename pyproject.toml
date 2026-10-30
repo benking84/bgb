@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "croniter>=3.0",
-  "cryptography>=43",
   "fastapi>=0.115",
   "google-api-python-client>=2.150",
   "google-auth>=2.36",

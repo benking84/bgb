@@ -84,7 +84,7 @@ def make_engine(tmp: Path, *, block_size: int = 32, volume_size: int = 4096, sou
 
         return build_sources(job, _settings, secrets)
 
-    engine = Engine(index, volumes, secrets, sources_for)
+    engine = Engine(index, volumes, sources_for)
     runtime = Runtime(index, volumes, secrets, tmp)
     runtime.engine = engine
     return runtime, holder

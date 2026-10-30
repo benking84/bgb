@@ -163,7 +163,7 @@ def _policy_delete(
     now: datetime,
     allow_full_removal: bool,
 ) -> list[str]:
-    """Port of Duplicati's RetentionPolicyRemover.
+    """Apply a bucket retention policy.
 
     The newest version is held aside. Each timeframe is applied from smallest
     to largest, consuming backups that fall inside it. Within a frame, backups

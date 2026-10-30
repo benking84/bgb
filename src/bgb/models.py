@@ -23,7 +23,6 @@ class Settings:
     service_account_secret: str = "bgb-workspace-sa"
     service_account_email: str = ""
     oauth_secret: str = "bgb-oauth-client"
-    encryption_key_secret: str = "bgb-encryption-key"
     gcs_bucket: str = ""
     gcs_prefix: str = "bgb"
     block_size: int = 102400

@@ -16,7 +16,8 @@ provider "google" {
 locals {
   backup_job_id   = "bgb-backup"
   backup_job_name = "projects/${var.project_id}/locations/${var.region}/jobs/${local.backup_job_id}"
-  services = [
+  use_cmek        = var.kms_key_name != ""
+  services = concat([
     "run.googleapis.com",
     "cloudscheduler.googleapis.com",
     "firestore.googleapis.com",
@@ -24,7 +25,7 @@ locals {
     "storage.googleapis.com",
     "iam.googleapis.com",
     "artifactregistry.googleapis.com",
-  ]
+  ], var.kms_key_name == "" ? [] : ["cloudkms.googleapis.com"])
 }
 
 resource "google_project_service" "required" {
@@ -40,13 +41,44 @@ resource "google_firestore_database" "default" {
   depends_on  = [google_project_service.required]
 }
 
+data "google_storage_project_service_account" "gcs" {
+  count      = local.use_cmek ? 1 : 0
+  depends_on = [google_project_service.required]
+}
+
+resource "google_kms_crypto_key_iam_member" "gcs_agent" {
+  count         = local.use_cmek ? 1 : 0
+  crypto_key_id = var.kms_key_name
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:${data.google_storage_project_service_account.gcs[0].email_address}"
+}
+
+resource "google_kms_crypto_key_iam_member" "runtime" {
+  count         = local.use_cmek ? 1 : 0
+  crypto_key_id = var.kms_key_name
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:${google_service_account.runtime.email}"
+}
+
 resource "google_storage_bucket" "backups" {
   name                        = var.bucket_name
   location                    = var.region
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
   force_destroy               = false
-  depends_on                  = [google_project_service.required]
+
+  dynamic "encryption" {
+    for_each = local.use_cmek ? [var.kms_key_name] : []
+    content {
+      default_kms_key_name = encryption.value
+    }
+  }
+
+  depends_on = [
+    google_project_service.required,
+    google_kms_crypto_key_iam_member.gcs_agent,
+    google_kms_crypto_key_iam_member.runtime,
+  ]
 }
 
 resource "google_service_account" "runtime" {
@@ -84,26 +116,12 @@ resource "google_service_account_iam_member" "runtime_signs_itself" {
   member             = "serviceAccount:${google_service_account.runtime.email}"
 }
 
-resource "google_secret_manager_secret" "encryption_key" {
-  secret_id = "bgb-encryption-key"
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.required]
-}
-
 resource "google_secret_manager_secret" "workspace_sa" {
   secret_id = "bgb-workspace-sa"
   replication {
     auto {}
   }
   depends_on = [google_project_service.required]
-}
-
-resource "google_secret_manager_secret_iam_member" "encryption_key" {
-  secret_id = google_secret_manager_secret.encryption_key.id
-  role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.runtime.email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "workspace_sa" {

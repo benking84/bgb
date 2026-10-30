@@ -11,7 +11,7 @@ def stamp(hours_ago: float, ident: str, now: datetime) -> Stamp:
     return Stamp(ident, now - timedelta(hours=hours_ago))
 
 
-def test_smart_retention_matches_duplicati_buckets():
+def test_smart_retention_buckets():
     now = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
     # Ages chosen so the 1-day bucket drops the 6h copy and the outer frame drops 800d.
     ages = [

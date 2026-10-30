@@ -137,7 +137,10 @@ export function SettingsForm() {
       <Card>
         <CardHeader>
           <CardTitle>Storage</CardTitle>
-          <CardDescription>Volumes are encrypted before they are written. The key secret must be 32 bytes, or 64 hex characters.</CardDescription>
+          <CardDescription>
+            Volumes are compressed, then stored. Cloud Storage and Firestore encrypt them at rest
+            with Google-managed keys unless the bucket is configured with a Cloud KMS key.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
           <Field label="Cloud Storage bucket">
@@ -145,9 +148,6 @@ export function SettingsForm() {
           </Field>
           <Field label="Object prefix">
             <Input value={settings.gcs_prefix} onChange={(event) => update("gcs_prefix", event.target.value)} />
-          </Field>
-          <Field label="Encryption key secret">
-            <Input value={settings.encryption_key_secret} onChange={(event) => update("encryption_key_secret", event.target.value)} />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Block size (bytes)">

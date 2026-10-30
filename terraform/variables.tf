@@ -1,5 +1,6 @@
 variable "project_id" {
-  type = string
+  type        = string
+  description = "Existing GCP project id. Terraform does not create the project."
 }
 
 variable "region" {
@@ -25,4 +26,10 @@ variable "image" {
 variable "allow_unauthenticated" {
   type    = bool
   default = false
+}
+
+variable "kms_key_name" {
+  type        = string
+  description = "Optional Cloud KMS key for the backup bucket, as projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY. Empty uses Google-managed encryption."
+  default     = ""
 }

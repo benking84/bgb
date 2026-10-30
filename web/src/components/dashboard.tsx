@@ -65,7 +65,7 @@ export function Dashboard() {
           <h1 className="font-heading text-4xl tracking-tight">Backup jobs</h1>
           <p className="mt-2 max-w-xl text-muted-foreground">
             Each job is a Workspace selection — mail, Drive, and the people who own them —
-            written as encrypted volumes.
+            written as compressed, deduplicated volumes.
           </p>
         </div>
         <Button nativeButton={false} render={<Link href="/jobs/new" />}>New backup</Button>
