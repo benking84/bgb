@@ -1,0 +1,13 @@
+.git
+.venv
+venv
+data
+**/__pycache__
+**/*.pyc
+web/node_modules
+web/.next
+web/out
+terraform/.terraform
+**/.env
+**/.env.local
+agent-tools

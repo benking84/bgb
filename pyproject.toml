@@ -1,0 +1,35 @@
+[project]
+name = "bgb"
+version = "0.1.0"
+description = "Block-level backup for Google Workspace, stored in Cloud Storage."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "croniter>=3.0",
+  "cryptography>=43",
+  "fastapi>=0.115",
+  "google-api-python-client>=2.150",
+  "google-auth>=2.36",
+  "google-cloud-firestore>=2.19",
+  "google-cloud-secret-manager>=2.21",
+  "google-cloud-storage>=2.18",
+  "pydantic>=2",
+  "uvicorn>=0.32",
+]
+
+[project.optional-dependencies]
+dev = ["httpx>=0.27", "pytest>=8"]
+
+[project.scripts]
+bgb = "bgb.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
