@@ -29,3 +29,19 @@ source_spec: `spec-8-2-github-connection-triggers-and-branch-protection.md`
 severity: medium
 reason: Both triggers run as bgb-cloudbuild by the story's own acceptance criteria, and guard-release in Story 8.5 keys on BRANCH_NAME, which for PR triggers is likely the base branch. Whether a separate low-privilege PR account is needed is a design decision for Stories 8.3 and 8.5. Recorded in CI-CD-SETUP.md. (declared severity: medium (unverified))
 status: open
+
+### DW-5: terraform init resolves provider versions fresh on every PR build because no .terraform.lock.hcl is committed.
+origin: spec-deferred 5f1550d00d82
+location: terraform/, cloudbuild.yaml test-pr-only-terraform
+source_spec: `spec-8-3-pull-request-path-tests-and-checks-run-once.md`
+severity: low
+reason: terraform/ holds no lock file and .gitignore excludes only .terraform/. A new provider release could change validate results with no repo change. Pre-existing from Story 8.1; fix is to commit the lock file after an init with provider access.
+status: open
+
+### DW-6: The four builder image tags were not pulled, so one may not exist.
+origin: spec-deferred a322fe8acd1a
+location: cloudbuild.yaml
+source_spec: `spec-8-3-pull-request-path-tests-and-checks-run-once.md`
+severity: medium
+reason: Versions were taken from local tool versions and known release lines. A missing tag fails every PR build at the first pull. Settled by pulling or running the first real build. (declared severity: medium (unverified))
+status: open

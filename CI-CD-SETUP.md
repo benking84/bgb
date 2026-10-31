@@ -86,7 +86,34 @@ Approvals are set to 0 because the repository has one maintainer, so the require
 2. Open a test PR to `main` and confirm the `bgb-pr` check appears and blocks merging until it passes and the branch is up to date.
 3. `cloudbuild.yaml` arrives in Story 8.3. Until then the triggers cannot run a useful build, so expect failures if applied earlier.
 
+## Pull request path (Story 8.3)
+
+Draft for review. `cloudbuild.yaml` has a `_MODE` substitution, `pr` or `main` (default `main`). The triggers set `_MODE`. Story 8.5 adds the registry substitutions it needs.
+
+| Mode | Behaviour |
+| --- | --- |
+| pr | Installs locked dependencies, runs the checks below, builds the image without pushing it. |
+| main | Every step prints a skip message and runs nothing. Stories 8.4 and 8.5 add the push and release. |
+
+Checks in `pr` mode, in order: `validate-mode` (fails on any `_MODE` other than `pr` or `main`, so a mistyped value cannot produce a green check with no tests), `install-deps-python` (`uv sync --locked --extra dev`), `install-deps-web` (`npm ci`), `test-pr-only` (`pytest`, `ruff check` and `ruff format --check` on `src` and `tests`), `test-pr-only-web` (`npm run lint`, `npm run build`), `test-pr-only-terraform` (`terraform fmt -check`, `terraform init -backend=false`, `terraform validate`), `build-image` (Dockerfile build, no push). Any failure fails the build. The build timeout is 20 minutes and logs go to Cloud Logging only.
+
+| Builder image | Why this image and version |
+| --- | --- |
+| ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim | uv 0.13.6 is the version used locally. Python 3.12 matches the Dockerfile runtime. |
+| node:22.12.0-bookworm-slim | Node 22 matches the Dockerfile web stage. |
+| hashicorp/terraform:1.14.6 | Terraform 1.14.6 is the version used locally and satisfies `required_version`. |
+| gcr.io/cloud-builders/docker:24.0.9 | Google's maintained Docker builder, used only to check that the Dockerfile builds. |
+
+`--locked` is used instead of `--frozen` because only `--locked` fails when `uv.lock` disagrees with `pyproject.toml`.
+
+Refreshing the lock: `ruff` was added to the `dev` extra in `pyproject.toml`, so `uv.lock` must be regenerated with `uv lock` and committed. Until it is, `uv sync --locked` fails the PR build.
+
+PR build time baseline (Epic 1 budget is 15 minutes): not yet recorded. Fill in after the first real PR build. No caching is added unless PR builds exceed 10 minutes.
+
 ## Assumptions to verify
+
+- Story 8.3: the builder image tags above were chosen from known releases and not pulled in this session. Confirm each resolves on the first build.
+- Story 8.3: `ruff format --check` and `ruff check` have not been run against `src` and `tests`. Existing code may fail them and need a formatting commit.
 
 - Story 8.2: `terraform validate` was not run (no provider access). Confirm the provider version supports `google_cloudbuildv2_*` and `repository_event_config`.
 - Story 8.2: the trigger `service_account` uses the full path `projects/PROJECT/serviceAccounts/EMAIL`. Confirm on the first plan.

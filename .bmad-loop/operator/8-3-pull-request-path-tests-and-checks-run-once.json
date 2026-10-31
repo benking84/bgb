@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "Run uv lock in the repo root and commit the updated uv.lock. ruff was added to the dev extra, and until the lock includes it uv sync --locked fails every PR build.",
+    "Run uv run --extra dev ruff check src tests and uv run --extra dev ruff format --check src tests, then fix or baseline findings so the gate starts green. Neither was run.",
+    "Run uv run --extra dev pytest and (cd web && npm ci && npm run lint && npm run build) to confirm the PR checks pass locally. None of these were run in this session.",
+    "Confirm each pinned builder tag resolves: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim, node:22.12.0-bookworm-slim, hashicorp/terraform:1.14.6, gcr.io/cloud-builders/docker:24.0.9. Change any that do not exist.",
+    "Run terraform -chdir=terraform init -backend=false and terraform validate on a machine with provider access, and consider committing terraform/.terraform.lock.hcl.",
+    "After Story 8.2 is applied, open a test PR, confirm bgb-pr runs all steps and fails on a deliberate error, merge and confirm bgb-main shows every step skipped, then record the PR build time in CI-CD-SETUP.md as the Epic 1 baseline.",
+    "Commit the Story 8.3 changes (cloudbuild.yaml, pyproject.toml, CI-CD-SETUP.md and this spec file) if the run could not."
+  ],
+  "followup_review_recommended": false,
+  "parked_at": "2026-10-31",
+  "run_id": "20261031-221635-7726",
+  "spec_file": "_bmad-output/implementation-artifacts/spec-8-3-pull-request-path-tests-and-checks-run-once.md",
+  "story_key": "8-3-pull-request-path-tests-and-checks-run-once"
+}

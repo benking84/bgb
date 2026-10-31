@@ -117,7 +117,7 @@ development_status:
   epic-8: backlog
   8-1-terraform-foundations-for-the-pipeline: awaiting-operator
   8-2-github-connection-triggers-and-branch-protection: awaiting-operator
-  8-3-pull-request-path-tests-and-checks-run-once: backlog
+  8-3-pull-request-path-tests-and-checks-run-once: awaiting-operator
   8-4-cloud-deploy-pipeline-and-cloud-run-manifests-prod-only: backlog
   8-5-main-path-build-once-push-and-create-a-release: backlog
   8-6-rollback-documentation-and-cutover: backlog

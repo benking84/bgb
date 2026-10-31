@@ -1,0 +1,108 @@
+# Draft for review. Story 8.3: pull request path.
+#
+# One file, two modes chosen by the _MODE substitution.
+#   pr   : install locked dependencies, run tests and checks, build the image without pushing.
+#   main : every test step prints a skip message and runs nothing. Tests ran on the PR, and
+#          branch protection requires the bgb-pr check. Stories 8.4 and 8.5 add push and release.
+#
+# Any failing command fails the build. Each step skips itself unless _MODE is pr.
+
+substitutions:
+  _MODE: main
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 1200s
+
+steps:
+  # Fails the build on any _MODE other than pr or main. Without it a mistyped value would skip
+  # every step and report a green PR check. Uses the uv image below, which the next step pulls anyway.
+  - id: validate-mode
+    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        case "${_MODE}" in
+          pr|main) echo "_MODE=${_MODE}" ;;
+          *) echo "Invalid _MODE=${_MODE}: expected pr or main"; exit 1 ;;
+        esac
+
+  # uv image pinned to the uv version in use locally (0.13.6) on Python 3.12, which matches the
+  # Dockerfile runtime. --locked fails the build if uv.lock disagrees with pyproject.toml.
+  - id: install-deps-python
+    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" != "pr" ]; then echo "Skipping install-deps-python: _MODE=${_MODE}"; exit 0; fi
+        uv sync --locked --extra dev
+
+  # Node 22 matches the web build stage in the Dockerfile. npm ci installs exactly what
+  # web/package-lock.json records and fails if package.json disagrees.
+  - id: install-deps-web
+    name: node:22.12.0-bookworm-slim
+    dir: web
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" != "pr" ]; then echo "Skipping install-deps-web: _MODE=${_MODE}"; exit 0; fi
+        npm ci
+
+  # Same uv image as install-deps-python so the virtualenv in /workspace/.venv is reusable.
+  - id: test-pr-only
+    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" != "pr" ]; then echo "Skipping test-pr-only: _MODE=${_MODE}"; exit 0; fi
+        set -euo pipefail
+        uv run --locked --extra dev pytest
+        uv run --locked --extra dev ruff check src tests
+        uv run --locked --extra dev ruff format --check src tests
+
+  # Same Node image as install-deps-web so node_modules is reusable. Lint and build mirror the
+  # Dockerfile web stage; NEXT_PUBLIC_API_BASE is empty there too.
+  - id: test-pr-only-web
+    name: node:22.12.0-bookworm-slim
+    dir: web
+    entrypoint: bash
+    env:
+      - NEXT_PUBLIC_API_BASE=
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" != "pr" ]; then echo "Skipping test-pr-only-web: _MODE=${_MODE}"; exit 0; fi
+        set -euo pipefail
+        npm run lint
+        npm run build
+
+  # Official Terraform image pinned to the version in use locally (1.14.6). The image is Alpine,
+  # so the shell is sh. init skips the backend so no state or credentials are needed.
+  - id: test-pr-only-terraform
+    name: hashicorp/terraform:1.14.6
+    dir: terraform
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" != "pr" ]; then echo "Skipping test-pr-only-terraform: _MODE=${_MODE}"; exit 0; fi
+        set -eu
+        terraform fmt -check
+        terraform init -backend=false -input=false
+        terraform validate
+
+  # Google's Docker builder, pinned to an exact tag. Builds only to check the Dockerfile.
+  # Nothing is tagged for a registry and nothing is pushed. Story 8.5 adds the main path.
+  - id: build-image
+    name: gcr.io/cloud-builders/docker:24.0.9
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" != "pr" ]; then echo "Skipping build-image: _MODE=${_MODE}"; exit 0; fi
+        docker build --tag bgb:pr-check .
