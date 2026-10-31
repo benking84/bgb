@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "Commit the Story 8.2 changes (terraform/main.tf, terraform/variables.tf, terraform/outputs.tf, CI-CD-SETUP.md and the spec file). The run could not commit because Bash was denied.",
+    "Run terraform -chdir=terraform fmt -check, then terraform init -backend=false and terraform validate on a machine that can reach registry.terraform.io, and fix anything reported. Neither was run after the review patches, and validate was never run.",
+    "In the Cloud Build console (Repositories, 2nd gen), create a GitHub host connection named bgb-github in the Terraform region and install the Cloud Build GitHub App on benking84/bgb only, as described in CI-CD-SETUP.md.",
+    "Import the connection into Terraform with terraform import google_cloudbuildv2_connection.github projects/PROJECT/locations/REGION/connections/bgb-github, then run terraform plan and terraform apply.",
+    "Run gcloud builds triggers list --region=REGION --project=PROJECT and confirm bgb-pr and bgb-main exist.",
+    "After Story 8.3 adds cloudbuild.yaml, open a test PR, read the exact bgb-pr check name, then set branch protection on main from CI-CD-SETUP.md (require that check, require up to date branches)."
+  ],
+  "followup_review_recommended": false,
+  "parked_at": "2026-10-31",
+  "run_id": "20261031-221635-7726",
+  "spec_file": "_bmad-output/implementation-artifacts/spec-8-2-github-connection-triggers-and-branch-protection.md",
+  "story_key": "8-2-github-connection-triggers-and-branch-protection"
+}

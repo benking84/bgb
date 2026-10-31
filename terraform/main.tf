@@ -453,3 +453,73 @@ resource "google_project_iam_member" "runtime_quota_viewer" {
   role    = "roles/cloudquotas.viewer"
   member  = "serviceAccount:${google_service_account.runtime.email}"
 }
+
+# GitHub connection and triggers (Story 8.2). The OAuth handshake is manual: create the connection
+# in the console, then import it. github_config is ignored so the OAuth credentials never show as
+# a diff. See CI-CD-SETUP.md.
+resource "google_cloudbuildv2_connection" "github" {
+  project  = var.project_id
+  location = var.region
+  name     = var.github_connection_name
+
+  github_config {}
+
+  lifecycle {
+    ignore_changes = [github_config]
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloudbuildv2_repository" "bgb" {
+  project           = var.project_id
+  location          = var.region
+  name              = "bgb"
+  parent_connection = google_cloudbuildv2_connection.github.name
+  remote_uri        = var.github_repository_uri
+}
+
+# Pull requests to main. Owners and collaborators run unprompted. Anyone else waits for a
+# maintainer to comment /gcbrun, so outside code never runs with project credentials unreviewed.
+resource "google_cloudbuild_trigger" "pr" {
+  project         = var.project_id
+  location        = var.region
+  name            = "bgb-pr"
+  description     = "Tests and checks for pull requests to main"
+  filename        = "cloudbuild.yaml"
+  service_account = google_service_account.cloudbuild.id
+
+  repository_event_config {
+    repository = google_cloudbuildv2_repository.bgb.id
+    pull_request {
+      branch          = "^main$"
+      comment_control = "COMMENTS_ENABLED_FOR_EXTERNAL_CONTRIBUTORS_ONLY"
+    }
+  }
+
+  substitutions = {
+    _MODE = "pr"
+  }
+}
+
+# Pushes to main: build, push and release. Tests are not rerun, so branch protection must
+# require the bgb-pr check (CI-CD-SETUP.md).
+resource "google_cloudbuild_trigger" "main" {
+  project         = var.project_id
+  location        = var.region
+  name            = "bgb-main"
+  description     = "Build, push and release on merge to main"
+  filename        = "cloudbuild.yaml"
+  service_account = google_service_account.cloudbuild.id
+
+  repository_event_config {
+    repository = google_cloudbuildv2_repository.bgb.id
+    push {
+      branch = "^main$"
+    }
+  }
+
+  substitutions = {
+    _MODE = "main"
+  }
+}

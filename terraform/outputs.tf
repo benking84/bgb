@@ -47,3 +47,15 @@ output "service_name" {
 output "backup_job_id" {
   value = google_cloud_run_v2_job.backup.id
 }
+
+output "github_connection" {
+  value = google_cloudbuildv2_connection.github.name
+}
+
+output "pr_trigger" {
+  value = google_cloudbuild_trigger.pr.name
+}
+
+output "main_trigger" {
+  value = google_cloudbuild_trigger.main.name
+}

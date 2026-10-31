@@ -70,3 +70,15 @@ variable "job_max_retries" {
   description = "Retries for a failed backup task. Each retry resumes from the last checkpoint."
   default     = 3
 }
+
+variable "github_connection_name" {
+  type        = string
+  description = "Name of the 2nd gen Cloud Build GitHub connection. Authorised once in the console, then imported (see CI-CD-SETUP.md)."
+  default     = "bgb-github"
+}
+
+variable "github_repository_uri" {
+  type        = string
+  description = "GitHub repository that triggers builds."
+  default     = "https://github.com/benking84/bgb.git"
+}
