@@ -64,7 +64,7 @@ Order matters. Do not run `terraform apply` before step 1 and the import in step
 
 1. Open Cloud Build, Repositories (2nd gen), in project `PROJECT` and region `REGION` (the Terraform `region`, default `australia-southeast1`).
 2. Create host connection, choose GitHub, and name it `bgb-github`. If you use another name, set `github_connection_name` and use that name in the import commands below.
-3. Complete the GitHub OAuth flow and install the Cloud Build GitHub App on `benking84/bgb` only.
+3. Complete the GitHub OAuth flow and install the Cloud Build GitHub App on `AviatoConsulting/bgb`. Aviato's org already has the app installed; if that installation is limited to selected repositories, add `bgb` to it.
 
 ### 2. Import and apply
 
@@ -92,7 +92,7 @@ See the Triggers table above.
 Example, run by a repository admin (confirm the context name first):
 
 ```
-gh api -X PUT repos/benking84/bgb/branches/main/protection --input - <<'JSON'
+gh api -X PUT repos/AviatoConsulting/bgb/branches/main/protection --input - <<'JSON'
 {
   "required_status_checks": { "strict": true, "contexts": ["bgb-pr"] },
   "enforce_admins": true,
@@ -104,7 +104,7 @@ gh api -X PUT repos/benking84/bgb/branches/main/protection --input - <<'JSON'
 JSON
 ```
 
-This replaces any existing protection on `main`. Review current settings first with `gh api repos/benking84/bgb/branches/main/protection`.
+This replaces any existing protection on `main`. Review current settings first with `gh api repos/AviatoConsulting/bgb/branches/main/protection`.
 
 Approvals are set to 0 because the repository has one maintainer, so the required check is the gate. `enforce_admins` is true so the owner cannot skip it. If Cloud Build or the GitHub App is down and a fix must merge, an admin can temporarily turn off `enforce_admins` in the branch protection settings, merge, and turn it back on. A merge made this way skips the PR tests.
 

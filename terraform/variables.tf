@@ -103,5 +103,5 @@ variable "github_connection_name" {
 variable "github_repository_uri" {
   type        = string
   description = "GitHub repository that triggers builds."
-  default     = "https://github.com/benking84/bgb.git"
+  default     = "https://github.com/AviatoConsulting/bgb.git"
 }
