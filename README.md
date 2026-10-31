@@ -78,8 +78,18 @@ Create the GCP project yourself. Terraform does not create it. Ownership is spli
 
 The pipeline, rollback, manual fallback and cutover steps are in [CI-CD-SETUP.md](CI-CD-SETUP.md).
 
+Terraform state is kept in a versioned, private Cloud Storage bucket (`terraform/main.tf`, `backend "gcs"`). Create it once before the first `init`:
+
 ```bash
-export PROJECT=your-project REGION=us-central1
+gcloud storage buckets create gs://$PROJECT-tfstate --project $PROJECT --location australia-southeast1 \
+  --uniform-bucket-level-access --public-access-prevention
+gcloud storage buckets update gs://$PROJECT-tfstate --versioning
+```
+
+The prod values are in `terraform/prod.tfvars` (`terraform -chdir=terraform apply -var-file=prod.tfvars`).
+
+```bash
+export PROJECT=your-project REGION=australia-southeast1
 export BUCKET=your-unique-bucket
 # Bootstrap image only. This is also the Terraform default, so -var image can be omitted.
 export IMAGE=us-docker.pkg.dev/cloudrun/container/hello
@@ -126,10 +136,10 @@ After apply, authorize domain-wide delegation for `bgb-delegate` and open the se
 | Variable | Meaning |
 | --- | --- |
 | `project_id` | Existing GCP project |
-| `region` | Cloud Run, bucket, and Scheduler region (default `us-central1`) |
+| `region` | Cloud Run, bucket, and Scheduler region (default `australia-southeast1`, so data stays in Australia) |
 | `bucket_name` | Globally unique Cloud Storage bucket |
 | `image` | Bootstrap Cloud Run image, used only at first creation. Cloud Deploy owns the image afterwards |
-| `firestore_location` | Firestore location (default `nam5`) |
+| `firestore_location` | Firestore location (default `australia-southeast1`; it can never be changed after creation) |
 | `kms_key_name` | Optional CMEK key for the bucket |
 | `allow_unauthenticated` | When true, the UI service is public |
 | `backup_project_id` | Optional separate project for the bucket (default: `project_id`) |

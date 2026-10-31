@@ -1,5 +1,11 @@
 terraform {
   required_version = ">= 1.5"
+  # State lives in a versioned, private bucket in the same project, created once by hand
+  # (see README "Deploy"). Only the deployers should be able to read it.
+  backend "gcs" {
+    bucket = "aviato-prod-demo-baby-got-back-tfstate"
+    prefix = "bgb"
+  }
   required_providers {
     google = {
       source  = "hashicorp/google"

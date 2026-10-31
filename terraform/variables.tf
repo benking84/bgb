@@ -5,13 +5,13 @@ variable "project_id" {
 
 variable "region" {
   type    = string
-  default = "us-central1"
+  default = "australia-southeast1"
 }
 
 variable "firestore_location" {
   type        = string
   description = "Firestore location. The (default) database can be created only once per project."
-  default     = "nam5"
+  default     = "australia-southeast1"
 }
 
 variable "bucket_name" {

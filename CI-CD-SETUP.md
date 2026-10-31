@@ -4,7 +4,7 @@ Draft for review. Operator guide for the bgb deployment pipeline: Cloud Build bu
 
 Nothing in this guide has been run against a real project by the author. Anything that depends on GCP or GitHub behaviour is marked as unverified, and the Assumptions section lists what to confirm on the first run. The rollback has not been tested. The cutover has not happened.
 
-Placeholders: `PROJECT` is the GCP project id (`aviato-prod-demo-baby-got-back`), `REGION` is the Terraform `region` (default `us-central1`).
+Placeholders: `PROJECT` is the GCP project id (`aviato-prod-demo-baby-got-back`), `REGION` is the Terraform `region` (default `australia-southeast1`).
 
 No service account has a key. Each role is granted at the narrowest scope the role supports. Cloud Deploy, logging and quota roles can only be granted on the project.
 
@@ -62,7 +62,7 @@ Order matters. Do not run `terraform apply` before step 1 and the import in step
 
 ### 1. Authorise the connection (console, once)
 
-1. Open Cloud Build, Repositories (2nd gen), in project `PROJECT` and region `REGION` (the Terraform `region`, default `us-central1`).
+1. Open Cloud Build, Repositories (2nd gen), in project `PROJECT` and region `REGION` (the Terraform `region`, default `australia-southeast1`).
 2. Create host connection, choose GitHub, and name it `bgb-github`. If you use another name, set `github_connection_name` and use that name in the import commands below.
 3. Complete the GitHub OAuth flow and install the Cloud Build GitHub App on `benking84/bgb` only.
 
@@ -115,7 +115,7 @@ Approvals are set to 0 because the repository has one maintainer, so the require
 
 ## Pull request path
 
-`cloudbuild.yaml` has a `_MODE` substitution, `pr` or `main` (default `main`). The triggers set `_MODE`. `_REGION` (default `us-central1`) sets the registry and Cloud Deploy region, and should match the Terraform `region`.
+`cloudbuild.yaml` has a `_MODE` substitution, `pr` or `main` (default `main`). The triggers set `_MODE`. `_REGION` (default `australia-southeast1`) sets the registry and Cloud Deploy region, and should match the Terraform `region`.
 
 | Mode | Behaviour |
 | --- | --- |

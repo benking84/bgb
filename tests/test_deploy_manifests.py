@@ -91,4 +91,4 @@ def test_every_placeholder_has_a_terraform_parameter():
 def test_no_hard_coded_environment_values():
     for text in (SERVICE, JOB, SKAFFOLD):
         assert "aviato" not in text
-        assert not re.search(r"us-central1|@.*\.iam\.gserviceaccount\.com", text)
+        assert not re.search(r"australia-southeast1|us-central1|@.*\.iam\.gserviceaccount\.com", text)

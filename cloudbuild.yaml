@@ -10,7 +10,7 @@
 
 substitutions:
   _MODE: main
-  _REGION: us-central1
+  _REGION: australia-southeast1
 
 options:
   logging: CLOUD_LOGGING_ONLY

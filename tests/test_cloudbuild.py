@@ -41,7 +41,7 @@ def test_no_latest_tag():
 
 
 def test_image_path_and_push():
-    assert "_REGION: us-central1" in BUILD
+    assert "_REGION: australia-southeast1" in BUILD
     build = STEPS["build-image"]
     assert f"{IMAGE}:${{COMMIT_SHA}}" in build
     assert "docker push" in build
