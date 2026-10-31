@@ -43,7 +43,9 @@ class MemoryIndex:
 
     def list_jobs(self) -> list[Job]:
         with self._lock:
-            return sorted(self.jobs.values(), key=lambda job: job.created_at, reverse=True)
+            return sorted(
+                self.jobs.values(), key=lambda job: job.created_at, reverse=True
+            )
 
     def delete_job(self, job_id: str) -> None:
         with self._lock:
@@ -101,7 +103,11 @@ class MemoryIndex:
     ) -> tuple[list[FileEntry], str]:
         with self._lock:
             rows = list(self.entries.get((job_id, fileset_id), []))
-        rows = [row for row in rows if row.path.startswith(prefix) and (not cursor or row.path > cursor)]
+        rows = [
+            row
+            for row in rows
+            if row.path.startswith(prefix) and (not cursor or row.path > cursor)
+        ]
         rows.sort(key=lambda row: row.path)
         page = rows[:limit]
         next_cursor = page[-1].path if len(rows) > limit and page else ""
@@ -134,14 +140,18 @@ class MemoryIndex:
             raise NotFound(f"block {digest} not found")
         return row
 
-    def put_block(self, job_id: str, block: BlockRef, *, overwrite: bool = False) -> bool:
+    def put_block(
+        self, job_id: str, block: BlockRef, *, overwrite: bool = False
+    ) -> bool:
         with self._lock:
             key = (job_id, block.hash)
             existing = self.blocks.get(key)
             if existing and not overwrite:
                 return False
             if existing and existing.volume_id != block.volume_id:
-                self.by_volume.get((job_id, existing.volume_id), set()).discard(block.hash)
+                self.by_volume.get((job_id, existing.volume_id), set()).discard(
+                    block.hash
+                )
             self.blocks[key] = block
             self.by_volume.setdefault((job_id, block.volume_id), set()).add(block.hash)
             return True
@@ -149,7 +159,11 @@ class MemoryIndex:
     def blocks_for_volume(self, job_id: str, volume_id: str) -> list[BlockRef]:
         with self._lock:
             hashes = self.by_volume.get((job_id, volume_id), set())
-            return [self.blocks[(job_id, digest)] for digest in hashes if (job_id, digest) in self.blocks]
+            return [
+                self.blocks[(job_id, digest)]
+                for digest in hashes
+                if (job_id, digest) in self.blocks
+            ]
 
     def delete_blocks(self, job_id: str, hashes: list[str]) -> None:
         with self._lock:
@@ -202,12 +216,24 @@ class MemoryIndex:
 
     def clear_backup_data(self, job_id: str) -> None:
         with self._lock:
-            self.filesets = {key: value for key, value in self.filesets.items() if key[0] != job_id}
-            self.entries = {key: value for key, value in self.entries.items() if key[0] != job_id}
-            self.blocks = {key: value for key, value in self.blocks.items() if key[0] != job_id}
-            self.by_volume = {key: value for key, value in self.by_volume.items() if key[0] != job_id}
-            self.blocksets = {key: value for key, value in self.blocksets.items() if key[0] != job_id}
-            self.volumes = {key: value for key, value in self.volumes.items() if key[0] != job_id}
+            self.filesets = {
+                key: value for key, value in self.filesets.items() if key[0] != job_id
+            }
+            self.entries = {
+                key: value for key, value in self.entries.items() if key[0] != job_id
+            }
+            self.blocks = {
+                key: value for key, value in self.blocks.items() if key[0] != job_id
+            }
+            self.by_volume = {
+                key: value for key, value in self.by_volume.items() if key[0] != job_id
+            }
+            self.blocksets = {
+                key: value for key, value in self.blocksets.items() if key[0] != job_id
+            }
+            self.volumes = {
+                key: value for key, value in self.volumes.items() if key[0] != job_id
+            }
             self.checkpoints.pop(job_id, None)
 
     def missing_blocks(self, job_id: str, hashes: list[str]) -> list[str]:
@@ -284,14 +310,21 @@ class FileIndex(MemoryIndex):
                     f"{job_id}/{fileset_id}": [entry.to_dict() for entry in rows]
                     for (job_id, fileset_id), rows in self.entries.items()
                 },
-                "blocks": [dict(block.to_dict(), job_id=job_id) for (job_id, _), block in self.blocks.items()],
+                "blocks": [
+                    dict(block.to_dict(), job_id=job_id)
+                    for (job_id, _), block in self.blocks.items()
+                ],
                 "blocksets": [
                     {"job_id": job_id, "id": blockset_id, "hashes": hashes}
                     for (job_id, blockset_id), hashes in self.blocksets.items()
                 ],
-                "volumes": [dict(volume.to_dict(), job_id=job_id) for (job_id, _), volume in self.volumes.items()],
+                "volumes": [
+                    dict(volume.to_dict(), job_id=job_id)
+                    for (job_id, _), volume in self.volumes.items()
+                ],
                 "checkpoints": {
-                    job_id: [entry.to_dict() for entry in rows.values()] for job_id, rows in self.checkpoints.items()
+                    job_id: [entry.to_dict() for entry in rows.values()]
+                    for job_id, rows in self.checkpoints.items()
                 },
             }
         temporary = self.path.with_suffix(".json.tmp")
@@ -310,7 +343,9 @@ class FileIndex(MemoryIndex):
             self.filesets[(fileset.job_id, fileset.id)] = fileset
         for key, rows in (payload.get("entries") or {}).items():
             job_id, fileset_id = key.split("/", 1)
-            self.entries[(job_id, fileset_id)] = [from_dict(FileEntry, row) for row in rows]
+            self.entries[(job_id, fileset_id)] = [
+                from_dict(FileEntry, row) for row in rows
+            ]
         for row in payload.get("blocks") or []:
             job_id = row["job_id"]
             block = from_dict(BlockRef, row)
@@ -322,4 +357,6 @@ class FileIndex(MemoryIndex):
             volume = from_dict(VolumeRef, row)
             self.volumes[(row["job_id"], volume.id)] = volume
         for job_id, rows in (payload.get("checkpoints") or {}).items():
-            self.checkpoints[job_id] = {row["source_id"]: from_dict(FileEntry, row) for row in rows}
+            self.checkpoints[job_id] = {
+                row["source_id"]: from_dict(FileEntry, row) for row in rows
+            }

@@ -101,7 +101,9 @@ class FakeDrive:
     def list_changes(self, user, token, drive_id):
         if self.expire or token != "t1":
             return None
-        return self.changes if self.changes is not None else {"changes": [], "token": "t1"}
+        return (
+            self.changes if self.changes is not None else {"changes": [], "token": "t1"}
+        )
 
     def get_file(self, user, file_id):
         if file_id not in self.files:
@@ -128,31 +130,58 @@ def test_drive_exports_docs_skips_unsupported_and_lists_shared_once():
         include_shared=True,
         shared_actor="ada@example.com",
     )
-    scan = source.scan(Job(id="j", name="n", include_shared_drives=True, created_at=now_iso()))
+    scan = source.scan(
+        Job(id="j", name="n", include_shared_drives=True, created_at=now_iso())
+    )
     paths = [obj.path for scope in scan.scopes for obj in scope.objects]
     assert "drive/users/ada@example.com/Policies/handbook.pdf" in paths
     assert "drive/users/ada@example.com/Budget.xlsx" in paths
     assert "drive/shared/d1/Published/handbook.pdf" in paths
-    assert not any("shortcut" in path or "Parking" in path or "old.pdf" in path for path in paths)
+    assert not any(
+        "shortcut" in path or "Parking" in path or "old.pdf" in path for path in paths
+    )
     assert any("form" in warning for warning in scan.warnings)
     ids = [obj.source_id for scope in scan.scopes for obj in scope.objects]
     assert ids.count("drive:shared-pdf") == 1
     assert ids.count("drive:handbook") == 1
-    budget = next(obj for scope in scan.scopes for obj in scope.objects if obj.source_id == "drive:budget")
+    budget = next(
+        obj
+        for scope in scan.scopes
+        for obj in scope.objects
+        if obj.source_id == "drive:budget"
+    )
     assert budget.opener().read() == SHEET
-    handbook = next(obj for scope in scan.scopes for obj in scope.objects if obj.source_id == "drive:handbook")
+    handbook = next(
+        obj
+        for scope in scan.scopes
+        for obj in scope.objects
+        if obj.source_id == "drive:handbook"
+    )
     assert handbook.opener().read() == PDF
 
 
 def test_drive_rename_reuses_blocks_and_removal_drops_the_file(tmp_path):
     client = FakeDrive()
-    source = DriveSource(client, ["ada@example.com"], include_shared=False, shared_actor="ada@example.com")
-    runtime, holder = make_engine(tmp_path, block_size=32, volume_size=10_000, source=source)
+    source = DriveSource(
+        client,
+        ["ada@example.com"],
+        include_shared=False,
+        shared_actor="ada@example.com",
+    )
+    runtime, holder = make_engine(
+        tmp_path, block_size=32, volume_size=10_000, source=source
+    )
     holder["source"] = source
     runtime.index.upsert_job(
-        job(users=["ada@example.com"], sources=["drive"], block_size=32, volume_size=10_000, include_shared_drives=False)
+        job(
+            users=["ada@example.com"],
+            sources=["drive"],
+            block_size=32,
+            volume_size=10_000,
+            include_shared_drives=False,
+        )
     )
-    first = runtime.engine.run_backup("job1")
+    runtime.engine.run_backup("job1")
     assert "handbook" in client.downloads
     assert "budget" in client.exports
     downloads = len(client.downloads)
@@ -160,7 +189,9 @@ def test_drive_rename_reuses_blocks_and_removal_drops_the_file(tmp_path):
 
     client.files["handbook"] = dict(client.files["handbook"], name="renamed.pdf")
     client.changes = {
-        "changes": [{"fileId": "handbook", "removed": False, "file": client.files["handbook"]}],
+        "changes": [
+            {"fileId": "handbook", "removed": False, "file": client.files["handbook"]}
+        ],
         "token": "t1",
     }
     second = runtime.engine.run_backup("job1")
@@ -177,14 +208,21 @@ def test_drive_rename_reuses_blocks_and_removal_drops_the_file(tmp_path):
     runtime.engine.run_backup("job1")
     fileset = runtime.index.list_filesets("job1")[0]
     paths = [row.path for row in runtime.index.iter_entries("job1", fileset.id)]
-    assert not any(path.endswith("renamed.pdf") or path.endswith("handbook.pdf") for path in paths)
+    assert not any(path.endswith(("renamed.pdf", "handbook.pdf")) for path in paths)
     assert exports == len(client.exports)
 
 
 def test_expired_change_token_falls_back_to_a_full_scan():
     client = FakeDrive()
-    source = DriveSource(client, ["ada@example.com"], include_shared=False, shared_actor="")
-    job = Job(id="j", name="n", created_at=now_iso(), source_state={"drive": {"users": {"ada@example.com": {"token": "old"}}}})
+    source = DriveSource(
+        client, ["ada@example.com"], include_shared=False, shared_actor=""
+    )
+    job = Job(
+        id="j",
+        name="n",
+        created_at=now_iso(),
+        source_state={"drive": {"users": {"ada@example.com": {"token": "old"}}}},
+    )
     client.expire = True
     scan = source.scan(job)
     assert scan.scopes[0].mode == "full"

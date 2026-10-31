@@ -73,7 +73,9 @@ class GCSVolumeStore:
         self.bucket = client.bucket(bucket_name)
 
     def put(self, name: str, data: bytes) -> None:
-        self.bucket.blob(name).upload_from_string(data, content_type="application/octet-stream")
+        self.bucket.blob(name).upload_from_string(
+            data, content_type="application/octet-stream"
+        )
 
     def get(self, name: str) -> bytes:
         return self.bucket.blob(name).download_as_bytes()
@@ -94,4 +96,6 @@ class GCSVolumeStore:
             raise
 
     def list(self, prefix: str = "") -> list[str]:
-        return [blob.name for blob in self.client.list_blobs(self.bucket, prefix=prefix)]
+        return [
+            blob.name for blob in self.client.list_blobs(self.bucket, prefix=prefix)
+        ]

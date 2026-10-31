@@ -51,7 +51,9 @@ class GcpSecrets:
         return response.payload.data
 
     def put(self, name: str, data: bytes) -> None:
-        raise SecretNotFound("refusing to write secrets from the Cloud Run process; use Secret Manager")
+        raise SecretNotFound(
+            "refusing to write secrets from the Cloud Run process; use Secret Manager"
+        )
 
 
 def env_flag(name: str) -> bool:

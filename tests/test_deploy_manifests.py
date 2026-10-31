@@ -54,7 +54,9 @@ def test_job_fixed_settings_match_terraform():
 
 def test_env_vars_match_terraform_except_known_differences():
     # The service gains BGB_IAP_AUDIENCE (Design Notes). The job keeps its retention variable.
-    assert set(_env_names(SERVICE)) == set(_tf_env_names(SERVICE_TF)) | {"BGB_IAP_AUDIENCE"}
+    assert set(_env_names(SERVICE)) == set(_tf_env_names(SERVICE_TF)) | {
+        "BGB_IAP_AUDIENCE"
+    }
     assert set(_env_names(JOB)) == set(_tf_env_names(JOB_TF))
 
 
@@ -78,7 +80,7 @@ def test_skaffold_lists_both_manifests():
 def test_every_placeholder_has_a_terraform_parameter():
     locals_block = MAIN_TF[MAIN_TF.index("base_deploy_parameters = {") :]
     locals_block = locals_block[: locals_block.index("\n  }")]
-    keys = set(re.findall(r"^\s+(\w+)\s+=", locals_block, re.M))
+    keys = set(re.findall(r"^\s+(\w+)\s+=", locals_block, re.MULTILINE))
     keys.discard("base_deploy_parameters")
     used = set(re.findall(r"\{\{\.(\w+)\}\}", SERVICE + JOB))
     assert used, "no placeholders found"

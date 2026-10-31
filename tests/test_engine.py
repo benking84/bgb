@@ -56,7 +56,9 @@ def test_dedup_restore_and_second_backup_skips_reads(tmp_path):
     assert third.stats["files_read"] == 1
     assert third.stats["blocks_new"] >= 1
     assert third.stats["blocks_reused"] >= 1
-    restored, _entry = runtime.engine.read_file("job1", runtime.index.list_filesets("job1")[0].id, "mem/other.bin")
+    restored, _entry = runtime.engine.read_file(
+        "job1", runtime.index.list_filesets("job1")[0].id, "mem/other.bin"
+    )
     assert restored == source.files["other.bin"]
 
 
@@ -65,7 +67,9 @@ def test_verify_reports_a_corrupt_volume(tmp_path):
     runtime, _holder = make_engine(tmp_path, source=source)
     runtime.index.upsert_job(job())
     runtime.engine.run_backup("job1")
-    volume = next(row for row in runtime.index.list_volumes("job1") if row.kind == "dblock")
+    volume = next(
+        row for row in runtime.index.list_volumes("job1") if row.kind == "dblock"
+    )
     blob = bytearray(runtime.volumes.get(volume.name))
     blob[-2] ^= 0xFF
     runtime.volumes.put(volume.name, bytes(blob))
@@ -75,9 +79,15 @@ def test_verify_reports_a_corrupt_volume(tmp_path):
 
 
 def test_retention_then_compact_drops_unreferenced_blocks(tmp_path):
-    source = BytesSource({"keep.bin": bytes(range(64)), "drop.bin": bytes(range(64, 128))})
-    runtime, holder = make_engine(tmp_path, block_size=32, volume_size=10_000, source=source)
-    runtime.index.upsert_job(job(retention="versions:1", block_size=32, volume_size=10_000))
+    source = BytesSource(
+        {"keep.bin": bytes(range(64)), "drop.bin": bytes(range(64, 128))}
+    )
+    runtime, holder = make_engine(
+        tmp_path, block_size=32, volume_size=10_000, source=source
+    )
+    runtime.index.upsert_job(
+        job(retention="versions:1", block_size=32, volume_size=10_000)
+    )
     runtime.engine.run_backup("job1")
     first_fileset = runtime.index.list_filesets("job1")[0].id
     assert runtime.index.count_blocks("job1") == 4
@@ -86,10 +96,15 @@ def test_retention_then_compact_drops_unreferenced_blocks(tmp_path):
     runtime.engine.run_backup("job1")
     with pytest.raises(NotFound):
         runtime.engine.read_file("job1", first_fileset, "mem/drop.bin")
-    kept = runtime.engine.read_file("job1", runtime.index.list_filesets("job1")[0].id, "mem/keep.bin")[0]
+    kept = runtime.engine.read_file(
+        "job1", runtime.index.list_filesets("job1")[0].id, "mem/keep.bin"
+    )[0]
     assert kept == bytes(range(64))
     assert runtime.index.count_blocks("job1") == 2
-    assert len([row for row in runtime.index.list_volumes("job1") if row.kind == "dblock"]) == 1
+    assert (
+        len([row for row in runtime.index.list_volumes("job1") if row.kind == "dblock"])
+        == 1
+    )
 
 
 def test_rebuild_index_from_volumes(tmp_path):
@@ -97,7 +112,9 @@ def test_rebuild_index_from_volumes(tmp_path):
     runtime, _holder = make_engine(tmp_path, source=source)
     runtime.index.upsert_job(job())
     runtime.engine.run_backup("job1")
-    before = runtime.engine.read_file("job1", runtime.index.list_filesets("job1")[0].id, "mem/notes.txt")[0]
+    before = runtime.engine.read_file(
+        "job1", runtime.index.list_filesets("job1")[0].id, "mem/notes.txt"
+    )[0]
     runtime.index.clear_backup_data("job1")
     assert runtime.index.list_filesets("job1") == []
     report = runtime.engine.rebuild("job1")
@@ -123,7 +140,14 @@ def test_file_index_reloads_a_job(tmp_path):
     index = FileIndex(tmp_path / "index.json")
     index.upsert_job(job())
     index.put_fileset(
-        FileSet(id="fs", job_id="job1", created_at=now_iso(), volume_id="v", file_count=0, bytes=0),
+        FileSet(
+            id="fs",
+            job_id="job1",
+            created_at=now_iso(),
+            volume_id="v",
+            file_count=0,
+            bytes=0,
+        ),
         [],
     )
     index.put_volume(

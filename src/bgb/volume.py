@@ -87,7 +87,9 @@ def encode_index(volume_name: str, blocks: list[tuple[str, bytes]]) -> bytes:
 
 def encode_fileset(meta: dict, entries: list[dict]) -> bytes:
     header = {"v": 1, "type": "fileset", "count": len(entries), **meta}
-    lines = [json.dumps(entry, separators=(",", ":"), sort_keys=True) for entry in entries]
+    lines = [
+        json.dumps(entry, separators=(",", ":"), sort_keys=True) for entry in entries
+    ]
     body = ("\n".join(lines) + ("\n" if lines else "")).encode()
     return _pack(header, body)
 

@@ -20,9 +20,13 @@ def resolve_users(job: Job, settings: Settings, secrets) -> list[str]:
     if job.users:
         return [user.strip().lower() for user in job.users if user.strip()]
     if not job.all_users:
-        raise ConfigError("Choose at least one user, or back up every user in the domain")
+        raise ConfigError(
+            "Choose at least one user, or back up every user in the domain"
+        )
     if settings.auth_mode == "oauth":
-        raise ConfigError("OAuth mode can only back up the user who granted consent. List that user explicitly.")
+        raise ConfigError(
+            "OAuth mode can only back up the user who granted consent. List that user explicitly."
+        )
     auth = GoogleAuth(settings, secrets)
     return GoogleDirectory(auth, settings.admin_email).list_user_emails()
 
@@ -84,7 +88,7 @@ def probe_connection(settings: Settings, secrets) -> dict:
         }
     try:
         emails = GoogleDirectory(auth, settings.admin_email).list_user_emails()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - the probe reports any failure to the user
         return {"ok": False, "mode": "service_account", "detail": str(exc)}
     return {
         "ok": True,

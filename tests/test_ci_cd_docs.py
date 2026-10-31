@@ -25,7 +25,9 @@ REQUIRED_HEADINGS = [
 
 
 def _headings() -> set[str]:
-    return {m.group(1).strip() for m in re.finditer(r"^#{1,4} (.+)$", GUIDE, re.M)}
+    return {
+        m.group(1).strip() for m in re.finditer(r"^#{1,4} (.+)$", GUIDE, re.MULTILINE)
+    }
 
 
 def _section(title: str) -> str:
@@ -41,7 +43,14 @@ def test_required_headings_exist():
 
 def test_architecture_names_the_pipeline_parts():
     arch = _section("Architecture")
-    for part in ["bgb-pr", "bgb-main", "Artifact Registry", "Cloud Deploy", "prod", "bgb-backup"]:
+    for part in [
+        "bgb-pr",
+        "bgb-main",
+        "Artifact Registry",
+        "Cloud Deploy",
+        "prod",
+        "bgb-backup",
+    ]:
         assert part in arch
 
 

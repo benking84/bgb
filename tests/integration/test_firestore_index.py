@@ -17,7 +17,9 @@ from tests.helpers import BytesSource, job, make_engine
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.p0,
-    pytest.mark.skip(reason="ATDD red phase: Firestore emulator harness not built yet (Story 1.4)"),
+    pytest.mark.skip(
+        reason="ATDD red phase: Firestore emulator harness not built yet (Story 1.4)"
+    ),
 ]
 
 
@@ -29,7 +31,9 @@ def test_ac1_put_block_stores_a_hash_once_on_every_index(index):
     block = BlockRef(hash=_digest(1), size=32, volume_id="vol-1")
 
     first = index.put_block("job1", block)
-    second = index.put_block("job1", BlockRef(hash=block.hash, size=32, volume_id="vol-2"))
+    second = index.put_block(
+        "job1", BlockRef(hash=block.hash, size=32, volume_id="vol-2")
+    )
 
     assert second is False
     assert first is True
@@ -47,7 +51,9 @@ def test_ac2_block_list_over_400_hashes_round_trips_in_order(index):
 
 def test_ac3_backup_over_500_writes_completes_on_firestore(tmp_path, firestore_index):
     files = {f"file-{n:04}.bin": f"distinct body {n}".encode() for n in range(600)}
-    runtime, _holder = make_engine(tmp_path, source=BytesSource(files), index=firestore_index)
+    runtime, _holder = make_engine(
+        tmp_path, source=BytesSource(files), index=firestore_index
+    )
     runtime.index.upsert_job(job())
 
     run = runtime.engine.run_backup("job1")
@@ -58,7 +64,9 @@ def test_ac3_backup_over_500_writes_completes_on_firestore(tmp_path, firestore_i
     assert len(runtime.index.iter_entries("job1", fileset.id)) == 600
 
 
-def test_ac4_northwind_restore_is_byte_identical_on_firestore(tmp_path, firestore_index):
+def test_ac4_northwind_restore_is_byte_identical_on_firestore(
+    tmp_path, firestore_index
+):
     runtime, _holder = make_engine(tmp_path, index=firestore_index)
     client = TestClient(create_app(runtime))
     client.post("/api/demo/seed")

@@ -8,10 +8,26 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-from bgb.errors import BgbError, ConfigError, Conflict, IntegrityError, NotFound, Retained
-from bgb.models import BlockRef, FileEntry, FileSet, Job, Run, Settings, SourceObject, VolumeRef
+from bgb.errors import (
+    BgbError,
+    ConfigError,
+    Conflict,
+    IntegrityError,
+    NotFound,
+    Retained,
+)
+from bgb.models import (
+    BlockRef,
+    FileEntry,
+    FileSet,
+    Job,
+    Run,
+    Settings,
+    SourceObject,
+    VolumeRef,
+)
 from bgb.retention import Stamp, filesets_to_delete
 from bgb.util import now_iso, parse_time, safe_path
 from bgb.volume import (
@@ -30,7 +46,7 @@ log = logging.getLogger("bgb.engine")
 
 
 def _object_name(prefix: str, job_id: str, kind: str) -> str:
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     token = uuid.uuid4().hex[:8]
     head = prefix.strip("/")
     tail = f"{job_id}/{kind}/{stamp}-{token}.bgb"
@@ -68,14 +84,24 @@ class Engine:
     are not compacted or deleted, and expired volumes are swept once they are old enough.
     """
 
-    def __init__(self, index, volumes, sources_for, *, prefix: str = "bgb", min_object_age: timedelta = timedelta(0)):
+    def __init__(
+        self,
+        index,
+        volumes,
+        sources_for,
+        *,
+        prefix: str = "bgb",
+        min_object_age: timedelta = timedelta(0),
+    ):
         self.index = index
         self.volumes = volumes
         self.sources_for = sources_for
         self.prefix = prefix
         self.min_object_age = min_object_age
         # Cloud Run retries of one execution share its name, so a retry can take over its own lease.
-        self.holder = os.environ.get("CLOUD_RUN_EXECUTION") or f"local-{uuid.uuid4().hex}"
+        self.holder = (
+            os.environ.get("CLOUD_RUN_EXECUTION") or f"local-{uuid.uuid4().hex}"
+        )
         self._locks: dict[str, threading.Lock] = {}
         self._guard = threading.Lock()
         self._rng = random.SystemRandom()
@@ -117,7 +143,9 @@ class Engine:
             raise Conflict("this run lost the job's lease to another execution")
         self._beats[job_id] = time.monotonic()
 
-    def run_backup(self, job_id: str, run_id: str | None = None, *, clock: datetime | None = None) -> Run:
+    def run_backup(
+        self, job_id: str, run_id: str | None = None, *, clock: datetime | None = None
+    ) -> Run:
         try:
             with self.leased(job_id):
                 return self._run_backup(job_id, run_id, clock)
@@ -132,22 +160,31 @@ class Engine:
         except NotFound:
             return
         if run.status == "queued":
-            run.status, run.phase, run.error, run.finished_at = "failed", "failed", reason, now_iso()
+            run.status, run.phase, run.error, run.finished_at = (
+                "failed",
+                "failed",
+                reason,
+                now_iso(),
+            )
             self.index.update_run(run)
 
     def _close_abandoned(self, job_id: str, current: str) -> None:
         """Runs left queued or running by a killed execution. Only called while holding the lease."""
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=LEASE_TTL)
+        cutoff = datetime.now(UTC) - timedelta(seconds=LEASE_TTL)
         for row in self.index.list_runs(job_id):
             # A queued run may still be starting in another execution; only stale ones are abandoned.
-            stale_queue = row.status == "queued" and (not row.started_at or parse_time(row.started_at) < cutoff)
+            stale_queue = row.status == "queued" and (
+                not row.started_at or parse_time(row.started_at) < cutoff
+            )
             if row.id != current and (row.status == "running" or stale_queue):
                 row.status, row.phase = "failed", "failed"
                 row.error = "abandoned: the run stopped without finishing (timeout or crash). Its progress was kept."
                 row.finished_at = row.finished_at or now_iso()
                 self.index.update_run(row)
 
-    def _run_backup(self, job_id: str, run_id: str | None, clock: datetime | None) -> Run:
+    def _run_backup(
+        self, job_id: str, run_id: str | None, clock: datetime | None
+    ) -> Run:
         job = self.index.get_job(job_id)
         settings = self._settings()
         block_size = job.block_size or settings.block_size
@@ -207,7 +244,9 @@ class Engine:
             run.phase = "blocks"
             run.stats = stats
             self.index.update_run(run)
-            ctx = _RunContext(job_id=job_id, writer=VolumeWriter(volume_size), stats=stats, run=run)
+            ctx = _RunContext(
+                job_id=job_id, writer=VolumeWriter(volume_size), stats=stats, run=run
+            )
             entries, new_state = self._collect(job, sources, previous, block_size, ctx)
             self._flush(ctx)
             self._check_reused(ctx)
@@ -236,7 +275,12 @@ class Engine:
             run.stats = stats
             run.status = "completed" if report["ok"] else "completed_with_warnings"
             run.phase = "done"
-            log.info("backup done job=%s files=%s new_blocks=%s", job_id, stats["files"], stats["blocks_new"])
+            log.info(
+                "backup done job=%s files=%s new_blocks=%s",
+                job_id,
+                stats["files"],
+                stats["blocks_new"],
+            )
         except Exception as exc:
             run.status = "failed"
             run.error = str(exc)
@@ -264,28 +308,46 @@ class Engine:
             scan = source.scan(job)
             stats["warnings"].extend(scan.warnings)
             new_state[source.name] = scan.state
-            owned = {sid: entry for sid, entry in by_id.items() if sid.startswith(source.id_prefix)}
+            owned = {
+                sid: entry
+                for sid, entry in by_id.items()
+                if sid.startswith(source.id_prefix)
+            }
             seen_scopes = set()
             for scope in scan.scopes:
                 seen_scopes.add(scope.scope)
-                prev_scope = {sid: entry for sid, entry in owned.items() if entry.scope == scope.scope}
+                prev_scope = {
+                    sid: entry
+                    for sid, entry in owned.items()
+                    if entry.scope == scope.scope
+                }
                 if scope.mode == "full":
                     seen: set[str] = set()
                     for obj in scope.objects:
                         if obj.source_id in seen:
                             continue
                         seen.add(obj.source_id)
-                        entries.append(self._ingest(obj, prev_scope.get(obj.source_id), block_size, ctx))
-                    stats["files_deleted"] += sum(1 for sid in prev_scope if sid not in seen)
+                        entries.append(
+                            self._ingest(
+                                obj, prev_scope.get(obj.source_id), block_size, ctx
+                            )
+                        )
+                    stats["files_deleted"] += sum(
+                        1 for sid in prev_scope if sid not in seen
+                    )
                 else:
                     upserts = {obj.source_id: obj for obj in scope.objects}
                     deleted = set(scope.deleted_ids)
-                    stats["files_deleted"] += sum(1 for sid in deleted if sid in prev_scope)
+                    stats["files_deleted"] += sum(
+                        1 for sid in deleted if sid in prev_scope
+                    )
                     for sid, old in prev_scope.items():
                         if sid in deleted:
                             continue
                         if sid in upserts:
-                            entries.append(self._ingest(upserts.pop(sid), old, block_size, ctx))
+                            entries.append(
+                                self._ingest(upserts.pop(sid), old, block_size, ctx)
+                            )
                         else:
                             entries.append(old)
                             stats["files_unchanged"] += 1
@@ -296,7 +358,9 @@ class Engine:
                     stats["files_deleted"] += 1
         return entries, new_state
 
-    def _ingest(self, obj: SourceObject, old: FileEntry | None, block_size, ctx: _RunContext) -> FileEntry:
+    def _ingest(
+        self, obj: SourceObject, old: FileEntry | None, block_size, ctx: _RunContext
+    ) -> FileEntry:
         job_id, writer, stats, run = ctx.job_id, ctx.writer, ctx.stats, ctx.run
         self.heartbeat(job_id)
         self._maybe_checkpoint(ctx)
@@ -330,7 +394,9 @@ class Engine:
                 if not chunk:
                     break
                 if len(chunk) > block_size:
-                    raise ConfigError(f"{obj.path} returned a read larger than the block size")
+                    raise ConfigError(
+                        f"{obj.path} returned a read larger than the block size"
+                    )
                 hasher_whole.update(chunk)
                 size += len(chunk)
                 block_hash = digest(chunk)
@@ -375,7 +441,10 @@ class Engine:
     def _maybe_checkpoint(self, ctx: _RunContext) -> None:
         if not ctx.pending:
             return
-        if len(ctx.pending) < CHECKPOINT_ENTRIES and time.monotonic() - ctx.saved_at < CHECKPOINT_SECONDS:
+        if (
+            len(ctx.pending) < CHECKPOINT_ENTRIES
+            and time.monotonic() - ctx.saved_at < CHECKPOINT_SECONDS
+        ):
             return
         self._flush(ctx)
 
@@ -395,7 +464,10 @@ class Engine:
             pairs = ctx.writer.take()
             volume = self._write_block_volume(ctx.job_id, pairs)
             for block_hash, data in pairs:
-                self.index.put_block(ctx.job_id, BlockRef(hash=block_hash, size=len(data), volume_id=volume.id))
+                self.index.put_block(
+                    ctx.job_id,
+                    BlockRef(hash=block_hash, size=len(data), volume_id=volume.id),
+                )
             ctx.stats["volumes"] += 1
             ctx.stats["stored_bytes"] += volume.size
         if ctx.pending:
@@ -405,7 +477,9 @@ class Engine:
             self.index.update_run(ctx.run)
         ctx.saved_at = time.monotonic()
 
-    def _write_block_volume(self, job_id: str, pairs: list[tuple[str, bytes]]) -> VolumeRef:
+    def _write_block_volume(
+        self, job_id: str, pairs: list[tuple[str, bytes]]
+    ) -> VolumeRef:
         prefix = self._settings().gcs_prefix or self.prefix
         blob = compress(encode_blocks(pairs))
         name = _object_name(prefix, job_id, "dblock")
@@ -440,7 +514,9 @@ class Engine:
         self.index.put_volume(job_id, index_volume)
         return block_volume
 
-    def _write_fileset(self, job: Job, entries: list[FileEntry], stats: dict) -> FileSet:
+    def _write_fileset(
+        self, job: Job, entries: list[FileEntry], stats: dict
+    ) -> FileSet:
         fileset_id = uuid.uuid4().hex
         created = now_iso()
         body = []
@@ -482,7 +558,7 @@ class Engine:
         return fileset
 
     def apply_retention(self, job: Job, *, now: datetime | None = None) -> list[str]:
-        moment = now or datetime.now(timezone.utc)
+        moment = now or datetime.now(UTC)
         filesets = self.index.list_filesets(job.id)
         stamps = [Stamp(row.id, parse_time(row.created_at)) for row in filesets]
         delete_ids = filesets_to_delete(stamps, job.retention, moment)
@@ -517,7 +593,7 @@ class Engine:
 
     def sweep_expired(self, job_id: str, *, now: datetime | None = None) -> int:
         """Delete expired volumes whose retention period has passed."""
-        moment = now or datetime.now(timezone.utc)
+        moment = now or datetime.now(UTC)
         removed = 0
         for volume in self.index.list_volumes(job_id):
             if volume.state == "expired" and self._old_enough(volume, moment):
@@ -526,7 +602,7 @@ class Engine:
 
     def compact(self, job_id: str) -> dict:
         threshold = self._settings().compact_waste_threshold
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         live: set[str] = set()
         for fileset in self.index.list_filesets(job_id):
             for entry in self.index.iter_entries(job_id, fileset.id):
@@ -564,7 +640,9 @@ class Engine:
             self._delete_volume_pair(job_id, volume, now)
         return {"volumes_rewritten": rewritten, "volumes_deleted": deleted}
 
-    def _delete_volume_pair(self, job_id: str, volume: VolumeRef, now: datetime) -> None:
+    def _delete_volume_pair(
+        self, job_id: str, volume: VolumeRef, now: datetime
+    ) -> None:
         self._retire(job_id, volume, now)
         if not volume.counterpart:
             return
@@ -577,7 +655,9 @@ class Engine:
             except Retained:
                 pass
 
-    def verify(self, job_id: str, *, full: bool = False, sample: int | None = None) -> dict:
+    def verify(
+        self, job_id: str, *, full: bool = False, sample: int | None = None
+    ) -> dict:
         issues: list[str] = []
         every = self.index.list_volumes(job_id)
         volumes = [row for row in every if row.state == "available"]
@@ -587,7 +667,11 @@ class Engine:
         extra = sorted(remote - {row.name for row in every})
         issues.extend(f"missing remote object {name}" for name in missing)
         dblocks = [row for row in volumes if row.kind == "dblock"]
-        count = len(dblocks) if full else (self._settings().verify_samples if sample is None else sample)
+        count = (
+            len(dblocks)
+            if full
+            else (self._settings().verify_samples if sample is None else sample)
+        )
         count = max(0, min(count, len(dblocks)))
         chosen = self._rng.sample(dblocks, count) if count else []
         for volume in chosen:
@@ -635,7 +719,9 @@ class Engine:
                     removed.append(name)
             return removed
 
-    def read_file(self, job_id: str, fileset_id: str, path: str) -> tuple[bytes, FileEntry]:
+    def read_file(
+        self, job_id: str, fileset_id: str, path: str
+    ) -> tuple[bytes, FileEntry]:
         entry = self.index.get_entry(job_id, fileset_id, path)
         return self._read_entry(job_id, entry, {}), entry
 
@@ -645,14 +731,18 @@ class Engine:
         for digest in hashes:
             block = self.index.get_block(job_id, digest)
             if block.volume_id not in cache:
-                cache[block.volume_id] = self._load_block_volume(job_id, block.volume_id)
+                cache[block.volume_id] = self._load_block_volume(
+                    job_id, block.volume_id
+                )
             chunk = cache[block.volume_id].get(digest)
             if chunk is None:
                 raise IntegrityError(f"block {digest} is missing from its volume")
             out += chunk
         data = bytes(out)
         if sha256_hex(data) != entry.content_hash:
-            raise IntegrityError(f"restored {entry.path} does not match its content hash")
+            raise IntegrityError(
+                f"restored {entry.path} does not match its content hash"
+            )
         return data
 
     def _load_block_volume(self, job_id: str, volume_id: str) -> dict[str, bytes]:
@@ -696,7 +786,9 @@ class Engine:
             for row in payload.entries:
                 hashes = list(row.get("hashes") or [])
                 if blockset_id(hashes) != row["blockset_id"]:
-                    raise IntegrityError(f"fileset hash list for {row.get('path')} does not match its blockset id")
+                    raise IntegrityError(
+                        f"fileset hash list for {row.get('path')} does not match its blockset id"
+                    )
                 self.index.put_blockset(job_id, row["blockset_id"], hashes)
                 entries.append(
                     FileEntry(
@@ -726,12 +818,20 @@ class Engine:
             filesets += 1
         for name, blob, payload in decoded:
             if payload.type == "index":
-                self._remember(job_id, name, blob, "dindex", len(payload.header.get("entries") or []))
+                self._remember(
+                    job_id,
+                    name,
+                    blob,
+                    "dindex",
+                    len(payload.header.get("entries") or []),
+                )
         if hasattr(self.index, "flush"):
             self.index.flush()
         return {"filesets": filesets, "objects": len(decoded)}
 
-    def _remember(self, job_id: str, name: str, blob: bytes, kind: str, count: int) -> VolumeRef:
+    def _remember(
+        self, job_id: str, name: str, blob: bytes, kind: str, count: int
+    ) -> VolumeRef:
         volume = VolumeRef(
             id=uuid.uuid4().hex,
             name=name,
@@ -751,4 +851,4 @@ def busy(run: Run, *, horizon: timedelta = timedelta(hours=24)) -> bool:
         return False
     if not run.started_at:
         return True
-    return datetime.now(timezone.utc) - parse_time(run.started_at) < horizon
+    return datetime.now(UTC) - parse_time(run.started_at) < horizon

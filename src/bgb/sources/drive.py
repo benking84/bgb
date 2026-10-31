@@ -33,7 +33,9 @@ class DriveSource:
     name = "drive"
     id_prefix = "drive:"
 
-    def __init__(self, client, users: list[str], *, include_shared: bool, shared_actor: str):
+    def __init__(
+        self, client, users: list[str], *, include_shared: bool, shared_actor: str
+    ):
         self.client = client
         self.users = [user.strip().lower() for user in users if user.strip()]
         self.include_shared = include_shared
@@ -72,7 +74,10 @@ class DriveSource:
                     )
                     warnings.extend(notes)
                     scopes.append(scope)
-                    shared_state[drive_id] = {"token": token, "name": drive.get("name") or drive_id}
+                    shared_state[drive_id] = {
+                        "token": token,
+                        "name": drive.get("name") or drive_id,
+                    }
         return Scan(
             scopes=scopes,
             state={"users": user_state, "shared": shared_state},
@@ -160,7 +165,9 @@ class DriveSource:
             elif obj:
                 objects.append(obj)
         return (
-            ScopeScan(scope=scope_id, mode="incremental", objects=objects, deleted_ids=deleted),
+            ScopeScan(
+                scope=scope_id, mode="incremental", objects=objects, deleted_ids=deleted
+            ),
             _skip_warnings(skipped, root),
         )
 
@@ -202,7 +209,12 @@ class DriveSource:
 
 
 def _revision(file: dict) -> str:
-    return str(file.get("md5Checksum") or file.get("headRevisionId") or file.get("modifiedTime") or file["id"])
+    return str(
+        file.get("md5Checksum")
+        or file.get("headRevisionId")
+        or file.get("modifiedTime")
+        or file["id"]
+    )
 
 
 def _display(file: dict) -> str:

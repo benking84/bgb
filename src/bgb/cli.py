@@ -13,8 +13,13 @@ from bgb.runtime import build_runtime
 
 
 def main(argv: list[str] | None = None) -> None:
-    logging.basicConfig(level=os.environ.get("BGB_LOG", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    parser = argparse.ArgumentParser(prog="bgb", description="Backup Google Workspace to Cloud Storage")
+    logging.basicConfig(
+        level=os.environ.get("BGB_LOG", "INFO"),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+    parser = argparse.ArgumentParser(
+        prog="bgb", description="Backup Google Workspace to Cloud Storage"
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     serve = sub.add_parser("serve", help="HTTP API and, when built, the web UI")
@@ -25,9 +30,13 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--job-id", required=True)
     run.add_argument("--run-id")
 
-    sub.add_parser("run-due", help="Run every job whose cron is due. Cloud Scheduler entrypoint.")
+    sub.add_parser(
+        "run-due", help="Run every job whose cron is due. Cloud Scheduler entrypoint."
+    )
 
-    verify = sub.add_parser("verify", help="Download sample volumes and check block hashes")
+    verify = sub.add_parser(
+        "verify", help="Download sample volumes and check block hashes"
+    )
     verify.add_argument("--job-id", required=True)
     verify.add_argument("--full", action="store_true")
 
@@ -40,17 +49,25 @@ def main(argv: list[str] | None = None) -> None:
     rebuild = sub.add_parser("rebuild", help="Rebuild the index from stored volumes")
     rebuild.add_argument("--job-id", required=True)
 
-    prune = sub.add_parser("prune", help="Delete stored objects the index does not reference")
+    prune = sub.add_parser(
+        "prune", help="Delete stored objects the index does not reference"
+    )
     prune.add_argument("--job-id", required=True)
 
-    delete_job = sub.add_parser("delete-job", help="Delete a job, its index records, and its stored objects")
+    delete_job = sub.add_parser(
+        "delete-job", help="Delete a job, its index records, and its stored objects"
+    )
     delete_job.add_argument("--job-id", required=True)
 
-    oauth = sub.add_parser("oauth-url", help="Print a Google OAuth consent URL for a single user")
+    oauth = sub.add_parser(
+        "oauth-url", help="Print a Google OAuth consent URL for a single user"
+    )
     oauth.add_argument("--client-id", required=True)
     oauth.add_argument("--redirect-uri", required=True)
 
-    exchange = sub.add_parser("oauth-exchange", help="Trade an OAuth code for a refresh token secret")
+    exchange = sub.add_parser(
+        "oauth-exchange", help="Trade an OAuth code for a refresh token secret"
+    )
     exchange.add_argument("--client-id", required=True)
     exchange.add_argument("--client-secret", required=True)
     exchange.add_argument("--redirect-uri", required=True)
@@ -104,7 +121,9 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(runtime.engine.rebuild(args.job_id), indent=2))
         return
     if args.cmd == "prune":
-        print(json.dumps({"removed": runtime.engine.prune_orphans(args.job_id)}, indent=2))
+        print(
+            json.dumps({"removed": runtime.engine.prune_orphans(args.job_id)}, indent=2)
+        )
         return
     if args.cmd == "delete-job":
         print(json.dumps(runtime.delete_job(args.job_id), indent=2))
@@ -139,7 +158,9 @@ def _exchange(runtime, args) -> None:
     with urllib.request.urlopen(request, timeout=30) as response:
         payload = json.loads(response.read().decode())
     if "refresh_token" not in payload:
-        raise SystemExit("Google did not return a refresh token. Repeat consent with prompt=consent.")
+        raise SystemExit(
+            "Google did not return a refresh token. Repeat consent with prompt=consent."
+        )
     secret = json.dumps(
         {
             "refresh_token": payload["refresh_token"],
@@ -150,14 +171,16 @@ def _exchange(runtime, args) -> None:
     settings = runtime.index.get_settings()
     try:
         runtime.secrets.put(settings.oauth_secret, secret)
-    except Exception:
+    except Exception:  # noqa: BLE001 - any store failure falls back to printing the secret for manual upload
         print(secret.decode())
         print(
             f"The secret store refused the write. Add the JSON above as a version of {settings.oauth_secret}.",
             file=sys.stderr,
         )
         return
-    print(f"Stored the refresh token in {settings.oauth_secret}. Set auth_mode to oauth.")
+    print(
+        f"Stored the refresh token in {settings.oauth_secret}. Set auth_mode to oauth."
+    )
 
 
 if __name__ == "__main__":

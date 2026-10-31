@@ -19,6 +19,7 @@ from bgb.sources.catalog import DIRECTORY_SCOPE, SOURCE_CATALOG
 from bgb.sources.factory import probe_connection
 from bgb.util import from_dict, now_iso
 
+
 class JobIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = ""
@@ -62,15 +63,23 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
     @app.middleware("http")
     async def token_gate(request: Request, call_next):
         expected = os.environ.get("BGB_API_TOKEN", "").strip()
-        if expected and request.url.path.startswith("/api") and request.url.path != "/api/health":
+        if (
+            expected
+            and request.url.path.startswith("/api")
+            and request.url.path != "/api/health"
+        ):
             header = request.headers.get("authorization", "")
             if header != f"Bearer {expected}":
-                return JSONResponse({"error": "unauthorized", "code": "unauthorized"}, status_code=401)
+                return JSONResponse(
+                    {"error": "unauthorized", "code": "unauthorized"}, status_code=401
+                )
         return await call_next(request)
 
     @app.exception_handler(BgbError)
     async def handle_bgb(_request: Request, exc: BgbError):
-        return JSONResponse({"error": str(exc), "code": exc.code}, status_code=exc.status)
+        return JSONResponse(
+            {"error": str(exc), "code": exc.code}, status_code=exc.status
+        )
 
     @app.get("/api/health")
     def health():
@@ -151,7 +160,12 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
     def create_job(body: JobIn):
         rt = _rt(app)
         _validate_job(body, rt.index.get_settings())
-        job = Job(id=os.urandom(6).hex(), created_at=now_iso(), updated_at=now_iso(), **body.model_dump())
+        job = Job(
+            id=os.urandom(6).hex(),
+            created_at=now_iso(),
+            updated_at=now_iso(),
+            **body.model_dump(),
+        )
         rt.index.upsert_job(job)
         rt.flush()
         return _job_view(rt, job)
@@ -166,7 +180,11 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
         rt = _rt(app)
         current = rt.index.get_job(job_id)
         _validate_job(body, rt.index.get_settings())
-        if body.block_size and body.block_size != current.block_size and rt.index.list_filesets(job_id):
+        if (
+            body.block_size
+            and body.block_size != current.block_size
+            and rt.index.list_filesets(job_id)
+        ):
             raise ConfigError("block size cannot change after the first backup")
         updated = Job(
             id=current.id,
@@ -267,7 +285,9 @@ def _validate_sizes(block_size: int, volume_size: int) -> None:
     if block_size < 16 or block_size > 16 * 1024 * 1024:
         raise ConfigError("block size must be between 16 bytes and 16 MiB")
     if volume_size < block_size or volume_size > 128 * 1024 * 1024:
-        raise ConfigError("volume size must be at least the block size and at most 128 MiB")
+        raise ConfigError(
+            "volume size must be at least the block size and at most 128 MiB"
+        )
 
 
 def _validate_job(body: JobIn, settings: Settings) -> None:
@@ -278,7 +298,9 @@ def _validate_job(body: JobIn, settings: Settings) -> None:
     unknown = [name for name in body.sources if name not in SUPPORTED_SOURCES]
     if unknown:
         raise ConfigError(
-            "unsupported sources: " + ", ".join(unknown) + ". Google Keep has no Workspace API."
+            "unsupported sources: "
+            + ", ".join(unknown)
+            + ". Google Keep has no Workspace API."
         )
     if not body.users and not body.all_users and not body.demo:
         raise ConfigError("list at least one user, or choose every user in the domain")

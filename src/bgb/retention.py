@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from bgb.errors import ConfigError
 
@@ -84,11 +84,7 @@ def _frames(body: str) -> list[Frame]:
             raise ConfigError(f"retention frame {part!r} must look like 1W:1D")
         timeframe_unlimited, timeframe = _span(pieces[0])
         keep_all, interval = _span(pieces[1])
-        if (
-            not keep_all
-            and not timeframe_unlimited
-            and interval >= timeframe
-        ):
+        if not keep_all and not timeframe_unlimited and interval >= timeframe:
             raise ConfigError(f"interval cannot be larger than its timeframe ({part})")
         frames.append(
             Frame(
@@ -110,20 +106,34 @@ def describe_retention(spec: str) -> str:
     if policy.kind == "time":
         days = policy.seconds / 86400
         if days.is_integer():
-            return f"Keep versions from the last {int(days)} days, and always the newest."
+            return (
+                f"Keep versions from the last {int(days)} days, and always the newest."
+            )
         return "Keep versions newer than the configured age, and always the newest."
     chunks = []
     for frame in policy.frames:
-        window = "all time" if frame.timeframe_unlimited else _human(frame.timeframe_seconds)
+        window = (
+            "all time" if frame.timeframe_unlimited else _human(frame.timeframe_seconds)
+        )
         if frame.keep_all:
             chunks.append(f"keep every version for {window}")
         else:
-            chunks.append(f"for {window}, keep one version each {_human(frame.interval_seconds)}")
-    return "Smart retention: " + "; ".join(chunks) + ". The newest version is always kept."
+            chunks.append(
+                f"for {window}, keep one version each {_human(frame.interval_seconds)}"
+            )
+    return (
+        "Smart retention: " + "; ".join(chunks) + ". The newest version is always kept."
+    )
 
 
 def _human(seconds: int) -> str:
-    for unit, size in (("years", _UNITS["Y"]), ("months", _UNITS["M"]), ("weeks", _UNITS["W"]), ("days", _UNITS["D"]), ("hours", _UNITS["h"])):
+    for unit, size in (
+        ("years", _UNITS["Y"]),
+        ("months", _UNITS["M"]),
+        ("weeks", _UNITS["W"]),
+        ("days", _UNITS["D"]),
+        ("hours", _UNITS["h"]),
+    ):
         if seconds % size == 0 and seconds >= size:
             count = seconds // size
             label = unit[:-1] if count == 1 else unit
@@ -139,7 +149,7 @@ def filesets_to_delete(
     allow_full_removal: bool = False,
 ) -> list[str]:
     if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
+        now = now.replace(tzinfo=UTC)
     policy = parse_retention(spec)
     if not filesets or policy.kind == "none":
         return []
@@ -176,9 +186,11 @@ def _policy_delete(
     remaining = list(ordered_desc[1:])
     delete: list[str] = []
     delete_newest = allow_full_removal
-    for frame in sorted(frames, key=lambda item: (item.timeframe_unlimited, item.timeframe_seconds)):
+    for frame in sorted(
+        frames, key=lambda item: (item.timeframe_unlimited, item.timeframe_seconds)
+    ):
         if frame.timeframe_unlimited:
-            bound = datetime.min.replace(tzinfo=timezone.utc)
+            bound = datetime.min.replace(tzinfo=UTC)
         else:
             bound = now - timedelta(seconds=frame.timeframe_seconds)
         in_frame: list[Stamp] = []
@@ -188,7 +200,11 @@ def _policy_delete(
         last_kept: Stamp | None = None
         interval = timedelta(seconds=frame.interval_seconds)
         for fileset in in_frame:
-            if last_kept is None or frame.keep_all or (fileset.when - last_kept.when) >= interval:
+            if (
+                last_kept is None
+                or frame.keep_all
+                or (fileset.when - last_kept.when) >= interval
+            ):
                 last_kept = fileset
             else:
                 delete.append(fileset.id)

@@ -31,7 +31,10 @@ def _retryable(exc) -> bool:
     except (AttributeError, UnicodeDecodeError, ValueError):
         return False
     reasons = {row.get("reason") for row in error.get("errors") or []}
-    return bool(reasons & _RATE_LIMIT_REASONS) or error.get("status") == "RESOURCE_EXHAUSTED"
+    return (
+        bool(reasons & _RATE_LIMIT_REASONS)
+        or error.get("status") == "RESOURCE_EXHAUSTED"
+    )
 
 
 def _delay(exc, attempt: int) -> float:
@@ -97,7 +100,9 @@ class GoogleAuth:
             from googleapiclient.discovery import build
 
             creds = self.credentials(subject, scopes)
-            self._services[key] = build(api, version, credentials=creds, cache_discovery=False)
+            self._services[key] = build(
+                api, version, credentials=creds, cache_discovery=False
+            )
         return self._services[key]
 
     def credentials(self, subject: str, scopes: list[str]):
@@ -107,7 +112,9 @@ class GoogleAuth:
         from google.oauth2 import service_account
 
         if info is not None:
-            base = service_account.Credentials.from_service_account_info(info, scopes=scopes)
+            base = service_account.Credentials.from_service_account_info(
+                info, scopes=scopes
+            )
             return base.with_subject(subject)
         email = self.settings.service_account_email
         if not email:
@@ -119,7 +126,9 @@ class GoogleAuth:
         from google.auth import iam
         from google.auth.transport.requests import Request
 
-        source, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        source, _ = google.auth.default(
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
         signer = iam.Signer(Request(), source, email)
         return service_account.Credentials(
             signer=signer,
@@ -170,19 +179,29 @@ class GoogleGmailClient:
 
     def list_message_ids(self, user: str, page_token: str | None):
         response = _execute(
-            lambda: self._svc(user).users().messages().list(
-                userId=user, pageToken=page_token, maxResults=500
+            lambda: (
+                self._svc(user)
+                .users()
+                .messages()
+                .list(userId=user, pageToken=page_token, maxResults=500)
             )
         )
-        return [row["id"] for row in response.get("messages") or []], response.get("nextPageToken")
+        return [row["id"] for row in response.get("messages") or []], response.get(
+            "nextPageToken"
+        )
 
     def get_metadata(self, user: str, message_id: str) -> dict:
         response = _execute(
-            lambda: self._svc(user).users().messages().get(
-                userId=user,
-                id=message_id,
-                format="metadata",
-                metadataHeaders=["Subject"],
+            lambda: (
+                self._svc(user)
+                .users()
+                .messages()
+                .get(
+                    userId=user,
+                    id=message_id,
+                    format="metadata",
+                    metadataHeaders=["Subject"],
+                )
             )
         )
         subject = ""
@@ -200,7 +219,12 @@ class GoogleGmailClient:
     def get_message(self, user: str, message_id: str) -> dict:
         """One raw fetch returns the bytes and the labels, so a backup skips the metadata call."""
         response = _execute(
-            lambda: self._svc(user).users().messages().get(userId=user, id=message_id, format="raw")
+            lambda: (
+                self._svc(user)
+                .users()
+                .messages()
+                .get(userId=user, id=message_id, format="raw")
+            )
         )
         return {
             "id": response["id"],
@@ -219,11 +243,21 @@ class GoogleGmailClient:
         try:
             while True:
                 response = _execute(
-                    lambda token=token: self._svc(user).users().history().list(
-                        userId=user,
-                        startHistoryId=start,
-                        pageToken=token,
-                        historyTypes=["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"],
+                    lambda token=token: (
+                        self._svc(user)
+                        .users()
+                        .history()
+                        .list(
+                            userId=user,
+                            startHistoryId=start,
+                            pageToken=token,
+                            historyTypes=[
+                                "messageAdded",
+                                "messageDeleted",
+                                "labelAdded",
+                                "labelRemoved",
+                            ],
+                        )
                     )
                 )
                 history_id = str(response.get("historyId") or history_id)
@@ -246,9 +280,7 @@ class GoogleGmailClient:
         return {"historyId": history_id, "records": records}
 
 
-_DRIVE_FIELDS = (
-    "id,name,mimeType,size,md5Checksum,modifiedTime,parents,driveId,headRevisionId,trashed"
-)
+_DRIVE_FIELDS = "id,name,mimeType,size,md5Checksum,modifiedTime,parents,driveId,headRevisionId,trashed"
 
 
 class GoogleDriveClient:
@@ -280,8 +312,15 @@ class GoogleDriveClient:
         drives = []
         token = None
         while True:
-            response = _execute(lambda token=token: self._svc(user).drives().list(pageSize=100, pageToken=token))
-            drives.extend({"id": row["id"], "name": row.get("name") or row["id"]} for row in response.get("drives") or [])
+            response = _execute(
+                lambda token=token: (
+                    self._svc(user).drives().list(pageSize=100, pageToken=token)
+                )
+            )
+            drives.extend(
+                {"id": row["id"], "name": row.get("name") or row["id"]}
+                for row in response.get("drives") or []
+            )
             token = response.get("nextPageToken")
             if not token:
                 return drives
@@ -290,7 +329,9 @@ class GoogleDriveClient:
         kwargs = {"supportsAllDrives": True}
         if drive_id:
             kwargs["driveId"] = drive_id
-        response = _execute(lambda: self._svc(user).changes().getStartPageToken(**kwargs))
+        response = _execute(
+            lambda: self._svc(user).changes().getStartPageToken(**kwargs)
+        )
         return response["startPageToken"]
 
     def list_changes(self, user: str, token: str, drive_id: str | None):
@@ -314,7 +355,9 @@ class GoogleDriveClient:
                 else:
                     kwargs["restrictToMyDrive"] = True
                     kwargs["includeItemsFromAllDrives"] = False
-                response = _execute(lambda kwargs=kwargs: self._svc(user).changes().list(**kwargs))
+                response = _execute(
+                    lambda kwargs=kwargs: self._svc(user).changes().list(**kwargs)
+                )
                 changes.extend(response.get("changes") or [])
                 if response.get("newStartPageToken"):
                     new_token = response["newStartPageToken"]
@@ -332,8 +375,10 @@ class GoogleDriveClient:
 
         try:
             return _execute(
-                lambda: self._svc(user).files().get(
-                    fileId=file_id, supportsAllDrives=True, fields=_DRIVE_FIELDS
+                lambda: (
+                    self._svc(user)
+                    .files()
+                    .get(fileId=file_id, supportsAllDrives=True, fields=_DRIVE_FIELDS)
                 )
             )
         except HttpError as exc:
@@ -341,11 +386,13 @@ class GoogleDriveClient:
                 raise FileNotFoundError(file_id) from exc
             raise
 
-    def download(self, user: str, file_id: str) -> "MediaStream":
-        request = self._svc(user).files().get_media(fileId=file_id, supportsAllDrives=True)
+    def download(self, user: str, file_id: str) -> MediaStream:
+        request = (
+            self._svc(user).files().get_media(fileId=file_id, supportsAllDrives=True)
+        )
         return MediaStream(request)
 
-    def export(self, user: str, file_id: str, mime: str) -> "MediaStream":
+    def export(self, user: str, file_id: str, mime: str) -> MediaStream:
         request = self._svc(user).files().export_media(fileId=file_id, mimeType=mime)
         return MediaStream(request)
 
@@ -386,7 +433,9 @@ class GoogleDirectory:
     def list_user_emails(self) -> list[str]:
         if not self.admin_email:
             raise ConfigError("admin_email is required to list Workspace users")
-        service = self.auth.service("admin", "directory_v1", self.admin_email, ADMIN_SCOPES)
+        service = self.auth.service(
+            "admin", "directory_v1", self.admin_email, ADMIN_SCOPES
+        )
         emails: list[str] = []
         token = None
         while True:
@@ -399,7 +448,11 @@ class GoogleDirectory:
                     pageToken=token,
                 )
             )
-            emails.extend(row["primaryEmail"].lower() for row in response.get("users") or [] if row.get("primaryEmail"))
+            emails.extend(
+                row["primaryEmail"].lower()
+                for row in response.get("users") or []
+                if row.get("primaryEmail")
+            )
             token = response.get("nextPageToken")
             if not token:
                 return emails
@@ -409,7 +462,9 @@ class GoogleContactsClient:
     def __init__(self, auth: GoogleAuth):
         self.auth = auth
 
-    def list_connections(self, user: str, page_token: str | None = None, sync_token: str | None = None):
+    def list_connections(
+        self, user: str, page_token: str | None = None, sync_token: str | None = None
+    ):
         from googleapiclient.errors import HttpError
 
         service = self.auth.service("people", "v1", user, CONTACTS_SCOPES)
@@ -427,7 +482,13 @@ class GoogleContactsClient:
             response = _execute(lambda: service.people().connections().list(**kwargs))
         except HttpError as exc:
             if getattr(exc.resp, "status", None) == 410:
-                return {"expired": True, "people": [], "deleted": [], "next_page": None, "sync_token": None}
+                return {
+                    "expired": True,
+                    "people": [],
+                    "deleted": [],
+                    "next_page": None,
+                    "sync_token": None,
+                }
             raise
         people = []
         deleted = []

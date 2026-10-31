@@ -21,9 +21,17 @@ STEPS = _steps()
 
 def test_expected_steps_in_order():
     ids = list(STEPS)
-    assert ids.index("validate-mode") < ids.index("guard-release") < ids.index("install-deps-python")
+    assert (
+        ids.index("validate-mode")
+        < ids.index("guard-release")
+        < ids.index("install-deps-python")
+    )
     assert ids.index("guard-release") < ids.index("build-image")
-    assert ids.index("build-image") < ids.index("read-digest") < ids.index("create-release")
+    assert (
+        ids.index("build-image")
+        < ids.index("read-digest")
+        < ids.index("create-release")
+    )
 
 
 def test_no_latest_tag():
@@ -37,7 +45,9 @@ def test_image_path_and_push():
     build = STEPS["build-image"]
     assert f"{IMAGE}:${{COMMIT_SHA}}" in build
     assert "docker push" in build
-    assert "docker push" not in "".join(v for k, v in STEPS.items() if k != "build-image")
+    assert "docker push" not in "".join(
+        v for k, v in STEPS.items() if k != "build-image"
+    )
     # PR build never pushes: the push is after the PR branch exits.
     assert build.index("exit 0") < build.index("docker push")
     assert "bgb:pr-check" in build
@@ -71,14 +81,16 @@ def test_main_path_runs_no_tests():
         assert name.startswith(("test-pr-only", "install-deps")), name
         assert f'if [ "${{_MODE}}" != "pr" ]; then echo "Skipping {name}' in step, name
     for name in ("read-digest", "create-release"):
-        assert f'if [ "${{_MODE}}" != "main" ]; then echo "Skipping {name}' in STEPS[name]
+        assert (
+            f'if [ "${{_MODE}}" != "main" ]; then echo "Skipping {name}' in STEPS[name]
+        )
 
 
 def test_builder_images_pinned_and_options_kept():
-    for image in re.findall(r"^    name: (\S+)", BUILD, re.M):
+    for image in re.findall(r"^    name: (\S+)", BUILD, re.MULTILINE):
         assert re.search(r":\d[\w.\-]*$", image), image
     assert "logging: CLOUD_LOGGING_ONLY" in BUILD
-    assert re.search(r"^timeout: \d+s", BUILD, re.M)
+    assert re.search(r"^timeout: \d+s", BUILD, re.MULTILINE)
 
 
 def test_dockerfile_installs_from_lock():
