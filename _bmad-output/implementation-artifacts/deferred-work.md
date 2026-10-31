@@ -69,3 +69,11 @@ source_spec: `spec-8-4-cloud-deploy-pipeline-and-cloud-run-manifests-prod-only.m
 severity: low
 reason: An empty list gives a pipeline with no stages. Whether the precondition fires before an invalid index error is unconfirmed until terraform validate runs. (declared severity: low (unverified))
 status: open
+
+### DW-10: Re-running a main build for the same commit fails at create-release because the release name sha-SHORT_SHA already exists.
+origin: spec-deferred 3b4ff982be74
+location: cloudbuild.yaml
+source_spec: `spec-8-5-main-path-build-once-push-and-create-a-release.md`
+severity: low
+reason: The release name is derived only from SHORT_SHA, as the story specifies. Documented in CI-CD-SETUP.md.
+status: open

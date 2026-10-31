@@ -1,14 +1,16 @@
-# Draft for review. Story 8.3: pull request path.
+# Draft for review. Stories 8.3 and 8.5: pull request path and main path.
 #
 # One file, two modes chosen by the _MODE substitution.
 #   pr   : install locked dependencies, run tests and checks, build the image without pushing.
-#   main : every test step prints a skip message and runs nothing. Tests ran on the PR, and
-#          branch protection requires the bgb-pr check. Stories 8.4 and 8.5 add push and release.
+#   main : no tests (they ran on the PR, and branch protection requires the bgb-pr check).
+#          Builds the image once, pushes it tagged by commit SHA, reads its digest and creates
+#          a Cloud Deploy release that references the image by digest.
 #
-# Any failing command fails the build. Each step skips itself unless _MODE is pr.
+# Any failing command fails the build. Each step skips itself unless it belongs to the mode.
 
 substitutions:
   _MODE: main
+  _REGION: us-central1
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -28,6 +30,21 @@ steps:
           pr|main) echo "_MODE=${_MODE}" ;;
           *) echo "Invalid _MODE=${_MODE}: expected pr or main"; exit 1 ;;
         esac
+
+  # Runs before any install, build or push so a misconfigured trigger can never push or release.
+  # PR builds skip it: they never push. A main build fails unless both _MODE and the branch are main.
+  - id: guard-release
+    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" = "pr" ]; then echo "Skipping guard-release: _MODE=${_MODE}"; exit 0; fi
+        if [ "${_MODE}" != "main" ] || [ "$BRANCH_NAME" != "main" ]; then
+          echo "Refusing to release: _MODE=${_MODE} BRANCH_NAME=$BRANCH_NAME (both must be main)"
+          exit 1
+        fi
+        echo "guard-release passed"
 
   # uv image pinned to the uv version in use locally (0.13.6) on Python 3.12, which matches the
   # Dockerfile runtime. --locked fails the build if uv.lock disagrees with pyproject.toml.
@@ -96,13 +113,59 @@ steps:
         terraform init -backend=false -input=false
         terraform validate
 
-  # Google's Docker builder, pinned to an exact tag. Builds only to check the Dockerfile.
-  # Nothing is tagged for a registry and nothing is pushed. Story 8.5 adds the main path.
+  # Google's Docker builder, pinned to an exact tag. The image is built once. On a PR it is only
+  # checked and never pushed. On main it is tagged by commit SHA (never latest) and pushed.
   - id: build-image
     name: gcr.io/cloud-builders/docker:24.0.9
     entrypoint: bash
     args:
       - -c
       - |
-        if [ "${_MODE}" != "pr" ]; then echo "Skipping build-image: _MODE=${_MODE}"; exit 0; fi
-        docker build --tag bgb:pr-check .
+        set -euo pipefail
+        if [ "${_MODE}" = "pr" ]; then
+          docker build --tag bgb:pr-check .
+          exit 0
+        fi
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/bgb/bgb:${COMMIT_SHA}"
+        docker build --tag "$$IMAGE" .
+        docker push "$$IMAGE"
+
+  # Reads the digest the registry assigned at push, so the release deploys exactly what was pushed.
+  # The file is shared with the next step through /workspace. Same Docker builder as build-image.
+  - id: read-digest
+    name: gcr.io/cloud-builders/docker:24.0.9
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" != "main" ]; then echo "Skipping read-digest: _MODE=${_MODE}"; exit 0; fi
+        set -euo pipefail
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/bgb/bgb:${COMMIT_SHA}"
+        REF=$$(docker inspect --format '{{index .RepoDigests 0}}' "$$IMAGE")
+        DIGEST="$${REF##*@}"
+        case "$$DIGEST" in
+          sha256:*) ;;
+          *) echo "Unexpected digest: $$DIGEST"; exit 1 ;;
+        esac
+        echo "$$DIGEST" > /workspace/image-digest
+        echo "Digest: $$DIGEST"
+
+  # Google Cloud SDK image pinned to an exact version; gcloud deploy is part of the core SDK.
+  # Two merges close together make two builds and two releases (names differ by SHORT_SHA).
+  # Cloud Deploy queues rollouts per target in release order, so the later release lands last.
+  - id: create-release
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:502.0.0-slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_MODE}" != "main" ]; then echo "Skipping create-release: _MODE=${_MODE}"; exit 0; fi
+        set -euo pipefail
+        DIGEST=$$(cat /workspace/image-digest)
+        gcloud deploy releases create "sha-${SHORT_SHA}" \
+          --delivery-pipeline=bgb \
+          --region="${_REGION}" \
+          --project="${PROJECT_ID}" \
+          --source=deploy \
+          --images="bgb=${_REGION}-docker.pkg.dev/${PROJECT_ID}/bgb/bgb@$$DIGEST" \
+          --annotations="commit-sha=${COMMIT_SHA},build-id=${BUILD_ID}"

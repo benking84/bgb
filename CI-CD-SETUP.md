@@ -88,12 +88,12 @@ Approvals are set to 0 because the repository has one maintainer, so the require
 
 ## Pull request path (Story 8.3)
 
-Draft for review. `cloudbuild.yaml` has a `_MODE` substitution, `pr` or `main` (default `main`). The triggers set `_MODE`. Story 8.5 adds the registry substitutions it needs.
+Draft for review. `cloudbuild.yaml` has a `_MODE` substitution, `pr` or `main` (default `main`). The triggers set `_MODE`. `_REGION` (default `us-central1`) sets the registry and Cloud Deploy region, and should match the Terraform `region`.
 
 | Mode | Behaviour |
 | --- | --- |
 | pr | Installs locked dependencies, runs the checks below, builds the image without pushing it. |
-| main | Every step prints a skip message and runs nothing. Stories 8.4 and 8.5 add the push and release. |
+| main | No tests run. Builds the image once, pushes it, reads its digest and creates a Cloud Deploy release (see Main path below). |
 
 Checks in `pr` mode, in order: `validate-mode` (fails on any `_MODE` other than `pr` or `main`, so a mistyped value cannot produce a green check with no tests), `install-deps-python` (`uv sync --locked --extra dev`), `install-deps-web` (`npm ci`), `test-pr-only` (`pytest`, `ruff check` and `ruff format --check` on `src` and `tests`), `test-pr-only-web` (`npm run lint`, `npm run build`), `test-pr-only-terraform` (`terraform fmt -check`, `terraform init -backend=false`, `terraform validate`), `build-image` (Dockerfile build, no push). Any failure fails the build. The build timeout is 20 minutes and logs go to Cloud Logging only.
 
@@ -103,6 +103,24 @@ Checks in `pr` mode, in order: `validate-mode` (fails on any `_MODE` other than 
 | node:22.12.0-bookworm-slim | Node 22 matches the Dockerfile web stage. |
 | hashicorp/terraform:1.14.6 | Terraform 1.14.6 is the version used locally and satisfies `required_version`. |
 | gcr.io/cloud-builders/docker:24.0.9 | Google's maintained Docker builder, used only to check that the Dockerfile builds. |
+
+## Main path (Story 8.5)
+
+Draft for review. A push to `main` runs the `bgb-main` trigger with `_MODE=main`. Steps, in order:
+
+1. `validate-mode`, then `guard-release`. The guard fails the build unless `_MODE` and `$BRANCH_NAME` are both `main`. It runs before any install, build or push, so a misconfigured trigger cannot push or release. PR builds skip it because they never push.
+2. The install and test steps print a skip message and run nothing. Tests ran on the PR.
+3. `build-image` builds once and pushes `REGION-docker.pkg.dev/PROJECT/bgb/bgb:COMMIT_SHA`. No `latest` tag is used.
+4. `read-digest` reads the digest assigned by the registry after the push and writes it to `/workspace/image-digest`.
+5. `create-release` creates release `sha-SHORT_SHA` on pipeline `bgb` from `deploy/`, with `--images=bgb=...@sha256:DIGEST` and annotations `commit-sha` and `build-id`.
+
+The Dockerfile now installs Python dependencies in a uv stage with `uv sync --locked --no-dev --no-editable` and copies the virtualenv into the runtime image, so the image uses the versions in `uv.lock` that the PR tested.
+
+Two merges close together: both builds push and create a release (names differ by short SHA), and Cloud Deploy queues rollouts for the target in release order, so the later release is rolled out last. Re-running a build for the same commit fails at `create-release` because the release name already exists. The image push is idempotent.
+
+| Builder image | Why this image and version |
+| --- | --- |
+| gcr.io/google.com/cloudsdktool/cloud-sdk:502.0.0-slim | Pinned Google Cloud SDK, which includes `gcloud deploy`. Used only to create the release. |
 
 `--locked` is used instead of `--frozen` because only `--locked` fails when `uv.lock` disagrees with `pyproject.toml`.
 
@@ -170,6 +188,9 @@ Add an entry to `deploy_targets` (with its own `require_approval` and `parameter
 - Story 8.4: the deployer may need access to the Cloud Deploy artifacts bucket. Confirm the required grant on the first rollout.
 - Story 8.4: Cloud Deploy's Cloud Run deployer can update both service and job in one release. The fallback is a post-deploy hook.
 - Story 8.5: `bgb-cloudbuild` needs no further roles to create a release. Confirm on the first main build.
+- Story 8.5: pytest, ruff and the Docker build were not run in the implementing session (shell access was denied). Run `uv run --extra dev pytest tests/test_cloudbuild.py tests/test_deploy_manifests.py` and the ruff checks.
+- Story 8.5: the image tag `cloud-sdk:502.0.0-slim`, the `--annotations` flag, `docker inspect` returning a `RepoDigests` entry after push, and the Dockerfile uv stage (venv path portability to the runtime stage) were not verified. Confirm on the first main build.
+- Story 8.5: the guard uses `$BRANCH_NAME`, which Cloud Build sets for push triggers. Confirm it is `main` on the first build.
 - Story 8.4: the Cloud Deploy service agent may need `roles/iam.serviceAccountUser` on `bgb-deployer`. Confirm on the first rollout.
 - Story 8.4: Cloud Deploy may add labels, annotations or traffic settings to the service and job. If `terraform plan` shows drift after a rollout, add those fields to `ignore_changes`.
 - Artifact Registry: the KEEP policy keeps the 20 newest versions of any tag state, because the provider does not allow a tag filter on `most_recent_versions`. Tagged versions older than 30 days are deleted unless they are among the newest 20.
