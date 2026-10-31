@@ -1,0 +1,12 @@
+# Cloud Deploy renders and deploys these manifests. Project and region come from the target,
+# and every environment specific value is a deploy parameter (see CI-CD-SETUP.md).
+apiVersion: skaffold/v4beta7
+kind: Config
+metadata:
+  name: bgb
+manifests:
+  rawYaml:
+    - service.yaml
+    - job.yaml
+deploy:
+  cloudrun: {}

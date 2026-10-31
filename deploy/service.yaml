@@ -1,0 +1,35 @@
+# Cloud Run service bgb. Fixed settings mirror terraform/main.tf (google_cloud_run_v2_service.ui).
+# BGB_CORS_ORIGINS is development only and is never set here.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: bgb
+spec:
+  template:
+    spec:
+      serviceAccountName: "{{.UI_SERVICE_ACCOUNT}}"
+      containerConcurrency: 80
+      timeoutSeconds: 3600
+      containers:
+        - image: bgb
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: BGB_USE_GCP
+              value: "1"
+            - name: BGB_INDEX
+              value: firestore
+            - name: BGB_VOLUMES
+              value: gcs
+            - name: BGB_GCS_BUCKET
+              value: "{{.BGB_GCS_BUCKET}}"
+            - name: GOOGLE_CLOUD_PROJECT
+              value: "{{.GOOGLE_CLOUD_PROJECT}}"
+            - name: BGB_CLOUD_RUN_JOB
+              value: "{{.BGB_CLOUD_RUN_JOB}}"
+            - name: BGB_IAP_AUDIENCE
+              value: "{{.BGB_IAP_AUDIENCE}}"

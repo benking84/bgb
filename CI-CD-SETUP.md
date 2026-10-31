@@ -110,7 +110,55 @@ Refreshing the lock: `ruff` was added to the `dev` extra in `pyproject.toml`, so
 
 PR build time baseline (Epic 1 budget is 15 minutes): not yet recorded. Fill in after the first real PR build. No caching is added unless PR builds exceed 10 minutes.
 
+## Cloud Deploy pipeline and manifests (Story 8.4)
+
+Draft for review. Terraform creates delivery pipeline `bgb` and one Cloud Deploy target per `deploy_targets` entry (default: `prod` only). Targets render and deploy as `bgb-deployer`, and `prod` has `requireApproval` false. `deploy/` holds `skaffold.yaml`, `service.yaml` and `job.yaml`. The manifests reproduce the Terraform runtime settings. The one difference is that the service also sets `BGB_IAP_AUDIENCE`, empty until Story 5.1.
+
+The `template` of the service `bgb` and job `bgb-backup` in Terraform is bootstrap only. Terraform creates both once with the bootstrap image, then ignores `template`, `client` and `client_version` (DEP-D1). Change runtime settings in `deploy/`, not in the Terraform `template`, or the two will disagree and Terraform will not apply the change. `BGB_CORS_ORIGINS` is development only and is never set in the manifests.
+
+### Deploy parameters
+
+Manifests use `{{.KEY}}` placeholders. Terraform fills each from `local.base_deploy_parameters`, and a target's `parameters` override them. Images are referenced by the placeholder `bgb`, which the release replaces with the built image digest.
+
+| Parameter | Source | Used by |
+| --- | --- | --- |
+| GOOGLE_CLOUD_PROJECT | `project_id` | service, job |
+| BGB_GCS_BUCKET | backup bucket | service, job |
+| BGB_CLOUD_RUN_JOB | full job path | service |
+| UI_SERVICE_ACCOUNT | `bgb-ui` email | service |
+| RUNTIME_SERVICE_ACCOUNT | `bgb-run` email | job |
+| BGB_OBJECT_RETENTION_DAYS | `object_retention_days` (must equal the bucket retention period) | job |
+| BGB_IAP_AUDIENCE | `iap_audience` | service |
+| JOB_TIMEOUT_SECONDS | `job_timeout_hours` times 3600 | job |
+| JOB_MAX_RETRIES | `job_max_retries` | job |
+
+### Release command for Story 8.5
+
+Story 8.5 adds the release step to `cloudbuild.yaml`. It must use the `deploy/` directory as the source, so Cloud Deploy finds `skaffold.yaml` and the two manifests:
+
+```
+gcloud deploy releases create sha-SHORT_SHA \
+  --delivery-pipeline=bgb --region=REGION --project=PROJECT \
+  --source=deploy \
+  --images=bgb=REGION-docker.pkg.dev/PROJECT/bgb/bgb@sha256:DIGEST
+```
+
+`--skaffold-file` is relative to `--source`, and its default is `skaffold.yaml`, so no flag is needed here. Confirm on the first release.
+
+### Adding a second environment
+
+Add an entry to `deploy_targets` (with its own `require_approval` and `parameters` for the bucket, job, service accounts and IAP audience) and append its id to `deploy_stage_order`. Apply Terraform. No change to `cloudbuild.yaml` is needed, because the release goes to the pipeline and the pipeline promotes through its stages. A target's `project_id` and `region` should stay at the pipeline's values (the defaults): the pipeline is created in `var.project_id` and `var.region`, and a target in another location may not resolve. The new environment needs its own service, job and IAM, which this Terraform does not yet create for another project.
+
+### Operator actions
+
+1. A3 spike, before relying on the pipeline: create a release and confirm one rollout updates both the service and the job. Steps: apply Terraform, build and push an image, run the release command above, then open the rollout in Cloud Deploy. Outcome: not yet recorded. If the job is not updated, use the fallback: a post-deploy hook running `gcloud run jobs update`.
+2. Confirm `{{.KEY}}` placeholders and the two-file `rawYaml` render correctly (the release's render step succeeds).
+3. After the first rollout, run `gcloud run services describe bgb --region=REGION --project=PROJECT` and `gcloud run jobs describe bgb-backup --region=REGION --project=PROJECT`. Check the image digest, service accounts, environment variables, timeout and retries.
+4. Run `terraform plan`. It must show no change to the service or job, and no destroy or replace of the service, job, bucket or Firestore database. If it shows drift from labels, annotations or traffic, add those fields to `ignore_changes`.
+
 ## Assumptions to verify
+
+- Story 8.4: the Cloud Deploy placeholder syntax (`{{.KEY}}`), the `skaffold/v4beta7` schema version and multi-resource `rawYaml` were not checked against current docs (no web access), and `terraform validate`, `terraform fmt` and pytest were not run in the implementing session. Confirm all on the first run.
 
 - Story 8.3: the builder image tags above were chosen from known releases and not pulled in this session. Confirm each resolves on the first build.
 - Story 8.3: `ruff format --check` and `ruff check` have not been run against `src` and `tests`. Existing code may fail them and need a formatting commit.

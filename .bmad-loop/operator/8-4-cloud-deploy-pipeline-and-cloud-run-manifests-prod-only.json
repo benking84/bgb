@@ -1,0 +1,17 @@
+{
+  "actions": [
+    "Commit the Story 8.4 changes (deploy/, terraform/main.tf, terraform/variables.tf, terraform/outputs.tf, tests/test_deploy_manifests.py, CI-CD-SETUP.md and this spec file). The run could not commit because Bash was denied.",
+    "Run terraform -chdir=terraform fmt -check, then terraform init -backend=false and terraform validate on a machine that can reach registry.terraform.io, and fix anything reported. None of these ran.",
+    "Run uv run --extra dev pytest tests/test_deploy_manifests.py and fix any failure. The tests did not run and match some main.tf text including spacing.",
+    "Spike assumption A3 with a hand written release: run gcloud deploy releases create against pipeline bgb with --source=deploy and an image digest, confirm the render succeeds with the {{.KEY}} placeholders and two-file rawYaml (check the skaffold apiVersion), and that one rollout updates both the bgb service and the bgb-backup job. Record the outcome in CI-CD-SETUP.md. If the job is not updated, add a post-deploy hook running gcloud run jobs update.",
+    "After the first rollout, compare gcloud run services describe bgb and gcloud run jobs describe bgb-backup with the configuration before cutover (only the image and the new service BGB_IAP_AUDIENCE variable may differ).",
+    "Run terraform plan after the rollout and confirm no change to the service or job and no destroy or replace of the service, job, bucket or Firestore database. Add drifting fields to ignore_changes if needed.",
+    "Apply Terraform and confirm the Cloud Deploy API accepts the empty BGB_IAP_AUDIENCE deploy parameter. If it rejects it, set iap_audience to a placeholder value until Story 5.1.",
+    "Grant any missing access found on the first rollout: the Cloud Deploy artifacts bucket for bgb-deployer and roles/iam.serviceAccountUser for the Cloud Deploy service agent on bgb-deployer."
+  ],
+  "followup_review_recommended": false,
+  "parked_at": "2026-10-31",
+  "run_id": "20261031-221635-7726",
+  "spec_file": "_bmad-output/implementation-artifacts/spec-8-4-cloud-deploy-pipeline-and-cloud-run-manifests-prod-only.md",
+  "story_key": "8-4-cloud-deploy-pipeline-and-cloud-run-manifests-prod-only"
+}

@@ -48,6 +48,14 @@ output "backup_job_id" {
   value = google_cloud_run_v2_job.backup.id
 }
 
+output "delivery_pipeline" {
+  value = google_clouddeploy_delivery_pipeline.bgb.name
+}
+
+output "deploy_targets" {
+  value = [for t in google_clouddeploy_target.targets : t.target_id]
+}
+
 output "github_connection" {
   value = google_cloudbuildv2_connection.github.name
 }

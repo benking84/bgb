@@ -45,3 +45,27 @@ source_spec: `spec-8-3-pull-request-path-tests-and-checks-run-once.md`
 severity: medium
 reason: Versions were taken from local tool versions and known release lines. A missing tag fails every PR build at the first pull. Settled by pulling or running the first real build. (declared severity: medium (unverified))
 status: open
+
+### DW-7: The Story 8.4 acceptance criterion that cloudbuild.yaml passes the Skaffold config when it creates the release is not met here.
+origin: spec-deferred 4fb1c086df89
+location: cloudbuild.yaml
+source_spec: `spec-8-4-cloud-deploy-pipeline-and-cloud-run-manifests-prod-only.md`
+severity: medium
+reason: The create-release step belongs to Story 8.5 and 8.3 forbade it. CI-CD-SETUP.md records the exact release command for 8.5 (--source=deploy).
+status: open
+
+### DW-8: The manifest test compares env var names, not values, and depends on terraform fmt spacing in main.tf.
+origin: spec-deferred 22fd4b5b6bd0
+location: tests/test_deploy_manifests.py
+source_spec: `spec-8-4-cloud-deploy-pipeline-and-cloud-run-manifests-prod-only.md`
+severity: low
+reason: tests/test_deploy_manifests.py checks name sets and exact aligned text such as the 3600s timeout line, so a wrong value passes and a reformat fails.
+status: open
+
+### DW-9: deploy_stage_order has no validation for empty or duplicate entries, and the missing-target check is a lifecycle precondition.
+origin: spec-deferred 67fed56fa0d0
+location: terraform/main.tf, terraform/variables.tf
+source_spec: `spec-8-4-cloud-deploy-pipeline-and-cloud-run-manifests-prod-only.md`
+severity: low
+reason: An empty list gives a pipeline with no stages. Whether the precondition fires before an invalid index error is unconfirmed until terraform validate runs. (declared severity: low (unverified))
+status: open

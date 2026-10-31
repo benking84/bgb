@@ -38,6 +38,20 @@ locals {
     "containerscanning.googleapis.com",
     "cloudquotas.googleapis.com",
   ], var.kms_key_name == "" ? [] : ["cloudkms.googleapis.com"])
+
+  # Base Cloud Deploy parameters. Keys are the {{.KEY}} placeholders in deploy/*.yaml. A target's
+  # own parameters override these, so a second environment can point at its own bucket and so on.
+  base_deploy_parameters = {
+    GOOGLE_CLOUD_PROJECT      = var.project_id
+    BGB_GCS_BUCKET            = google_storage_bucket.backups.name
+    BGB_CLOUD_RUN_JOB         = local.backup_job_name
+    UI_SERVICE_ACCOUNT        = google_service_account.ui.email
+    RUNTIME_SERVICE_ACCOUNT   = google_service_account.runtime.email
+    BGB_OBJECT_RETENTION_DAYS = tostring(var.object_retention_days)
+    BGB_IAP_AUDIENCE          = var.iap_audience
+    JOB_TIMEOUT_SECONDS       = tostring(var.job_timeout_hours * 3600)
+    JOB_MAX_RETRIES           = tostring(var.job_max_retries)
+  }
 }
 
 resource "google_project_service" "required" {
@@ -452,6 +466,56 @@ resource "google_project_iam_member" "runtime_quota_viewer" {
   project = var.project_id
   role    = "roles/cloudquotas.viewer"
   member  = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+# Cloud Deploy (Story 8.4). One target per deploy_targets entry, promoted in deploy_stage_order.
+# Targets render and deploy as bgb-deployer.
+resource "google_clouddeploy_target" "targets" {
+  for_each = var.deploy_targets
+
+  name             = each.key
+  description      = "bgb ${each.key}"
+  project          = coalesce(each.value.project_id, var.project_id)
+  location         = coalesce(each.value.region, var.region)
+  require_approval = each.value.require_approval
+
+  run {
+    location = "projects/${coalesce(each.value.project_id, var.project_id)}/locations/${coalesce(each.value.region, var.region)}"
+  }
+
+  execution_configs {
+    usages          = ["RENDER", "DEPLOY"]
+    service_account = google_service_account.deployer.email
+  }
+
+  deploy_parameters = merge(local.base_deploy_parameters, each.value.parameters)
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_clouddeploy_delivery_pipeline" "bgb" {
+  name        = "bgb"
+  description = "bgb release pipeline"
+  project     = var.project_id
+  location    = var.region
+
+  serial_pipeline {
+    dynamic "stages" {
+      for_each = var.deploy_stage_order
+      content {
+        target_id = google_clouddeploy_target.targets[stages.value].target_id
+      }
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = alltrue([for t in var.deploy_stage_order : contains(keys(var.deploy_targets), t)])
+      error_message = "Every deploy_stage_order entry must be a key of deploy_targets."
+    }
+  }
+
+  depends_on = [google_project_service.required]
 }
 
 # GitHub connection and triggers (Story 8.2). The OAuth handshake is manual: create the connection

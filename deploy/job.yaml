@@ -1,0 +1,39 @@
+# Cloud Run job bgb-backup. Fixed settings mirror terraform/main.tf (google_cloud_run_v2_job.backup).
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: bgb-backup
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          serviceAccountName: "{{.RUNTIME_SERVICE_ACCOUNT}}"
+          # Unquoted on purpose: Cloud Deploy substitutes text before parsing, and these are integers.
+          timeoutSeconds: {{.JOB_TIMEOUT_SECONDS}}
+          maxRetries: {{.JOB_MAX_RETRIES}}
+          containers:
+            - image: bgb
+              command:
+                - python
+              args:
+                - -m
+                - bgb
+                - run-due
+              resources:
+                limits:
+                  cpu: "2"
+                  memory: 2Gi
+              env:
+                - name: BGB_USE_GCP
+                  value: "1"
+                - name: BGB_INDEX
+                  value: firestore
+                - name: BGB_VOLUMES
+                  value: gcs
+                - name: BGB_GCS_BUCKET
+                  value: "{{.BGB_GCS_BUCKET}}"
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: "{{.GOOGLE_CLOUD_PROJECT}}"
+                - name: BGB_OBJECT_RETENTION_DAYS
+                  value: "{{.BGB_OBJECT_RETENTION_DAYS}}"
