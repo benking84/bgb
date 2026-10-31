@@ -17,6 +17,13 @@ locals {
   backup_job_id   = "bgb-backup"
   backup_job_name = "projects/${var.project_id}/locations/${var.region}/jobs/${local.backup_job_id}"
   use_cmek        = var.kms_key_name != ""
+  backup_project  = var.backup_project_id != "" ? var.backup_project_id : var.project_id
+  separate_backup = local.backup_project != var.project_id
+  # Static keys so for_each works before the accounts exist.
+  app_accounts = {
+    run = google_service_account.runtime.email
+    ui  = google_service_account.ui.email
+  }
   services = concat([
     "run.googleapis.com",
     "cloudscheduler.googleapis.com",
@@ -34,6 +41,13 @@ resource "google_project_service" "required" {
   disable_on_destroy = false
 }
 
+resource "google_project_service" "backup_storage" {
+  count              = local.separate_backup ? 1 : 0
+  project            = local.backup_project
+  service            = "storage.googleapis.com"
+  disable_on_destroy = false
+}
+
 resource "google_firestore_database" "default" {
   name        = "(default)"
   location_id = var.firestore_location
@@ -43,7 +57,8 @@ resource "google_firestore_database" "default" {
 
 data "google_storage_project_service_account" "gcs" {
   count      = local.use_cmek ? 1 : 0
-  depends_on = [google_project_service.required]
+  project    = local.backup_project
+  depends_on = [google_project_service.required, google_project_service.backup_storage]
 }
 
 resource "google_kms_crypto_key_iam_member" "gcs_agent" {
@@ -54,18 +69,35 @@ resource "google_kms_crypto_key_iam_member" "gcs_agent" {
 }
 
 resource "google_kms_crypto_key_iam_member" "runtime" {
-  count         = local.use_cmek ? 1 : 0
+  for_each      = local.use_cmek ? local.app_accounts : {}
   crypto_key_id = var.kms_key_name
   role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
-  member        = "serviceAccount:${google_service_account.runtime.email}"
+  member        = "serviceAccount:${each.value}"
 }
 
 resource "google_storage_bucket" "backups" {
   name                        = var.bucket_name
+  project                     = local.backup_project
   location                    = var.region
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
   force_destroy               = false
+
+  # Deleted objects stay restorable for this long. Only bucket admins can shorten it,
+  # and no bgb account is a bucket admin.
+  soft_delete_policy {
+    retention_duration_seconds = var.soft_delete_days * 86400
+  }
+
+  # No object can be deleted or replaced until it is this old, by any account.
+  # Locking makes the period permanent: it can then be raised but never lowered or removed.
+  dynamic "retention_policy" {
+    for_each = var.object_retention_days > 0 ? [var.object_retention_days] : []
+    content {
+      retention_period = retention_policy.value * 86400
+      is_locked        = var.lock_retention
+    }
+  }
 
   dynamic "encryption" {
     for_each = local.use_cmek ? [var.kms_key_name] : []
@@ -76,14 +108,29 @@ resource "google_storage_bucket" "backups" {
 
   depends_on = [
     google_project_service.required,
+    google_project_service.backup_storage,
     google_kms_crypto_key_iam_member.gcs_agent,
     google_kms_crypto_key_iam_member.runtime,
   ]
 }
 
+# Three identities, so the internet-facing UI cannot delete backups:
+#   bgb-run       the backup job. Writes and deletes stored objects.
+#   bgb-ui        the UI service. Reads stored objects; starts the job for anything destructive.
+#   bgb-delegate  the Workspace domain-wide delegation account. No Google Cloud roles at all.
 resource "google_service_account" "runtime" {
   account_id   = "bgb-run"
-  display_name = "bgb Cloud Run runtime"
+  display_name = "bgb backup job"
+}
+
+resource "google_service_account" "ui" {
+  account_id   = "bgb-ui"
+  display_name = "bgb UI service"
+}
+
+resource "google_service_account" "delegate" {
+  account_id   = "bgb-delegate"
+  display_name = "bgb Workspace delegation"
 }
 
 resource "google_service_account" "scheduler" {
@@ -97,23 +144,33 @@ resource "google_storage_bucket_iam_member" "runtime_objects" {
   member = "serviceAccount:${google_service_account.runtime.email}"
 }
 
-resource "google_project_iam_member" "runtime_firestore" {
-  project = var.project_id
-  role    = "roles/datastore.user"
-  member  = "serviceAccount:${google_service_account.runtime.email}"
+resource "google_storage_bucket_iam_member" "ui_objects" {
+  bucket = google_storage_bucket.backups.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.ui.email}"
 }
 
-resource "google_project_iam_member" "runtime_secrets" {
-  project = var.project_id
-  role    = "roles/secretmanager.secretAccessor"
-  member  = "serviceAccount:${google_service_account.runtime.email}"
+resource "google_project_iam_member" "firestore" {
+  for_each = local.app_accounts
+  project  = var.project_id
+  role     = "roles/datastore.user"
+  member   = "serviceAccount:${each.value}"
 }
 
-# Lets the runtime account sign Workspace-delegation JWTs without a JSON key.
-resource "google_service_account_iam_member" "runtime_signs_itself" {
-  service_account_id = google_service_account.runtime.name
+resource "google_project_iam_member" "secrets" {
+  for_each = local.app_accounts
+  project  = var.project_id
+  role     = "roles/secretmanager.secretAccessor"
+  member   = "serviceAccount:${each.value}"
+}
+
+# Lets the job and the UI sign Workspace delegation JWTs as bgb-delegate without a JSON key.
+# bgb-delegate holds no Google Cloud roles, so signing as it reaches Workspace only.
+resource "google_service_account_iam_member" "delegate_signers" {
+  for_each           = local.app_accounts
+  service_account_id = google_service_account.delegate.name
   role               = "roles/iam.serviceAccountTokenCreator"
-  member             = "serviceAccount:${google_service_account.runtime.email}"
+  member             = "serviceAccount:${each.value}"
 }
 
 resource "google_secret_manager_secret" "workspace_sa" {
@@ -125,9 +182,10 @@ resource "google_secret_manager_secret" "workspace_sa" {
 }
 
 resource "google_secret_manager_secret_iam_member" "workspace_sa" {
+  for_each  = local.app_accounts
   secret_id = google_secret_manager_secret.workspace_sa.id
   role      = "roles/secretmanager.secretAccessor"
-  member    = "serviceAccount:${google_service_account.runtime.email}"
+  member    = "serviceAccount:${each.value}"
 }
 
 resource "google_cloud_run_v2_service" "ui" {
@@ -135,7 +193,7 @@ resource "google_cloud_run_v2_service" "ui" {
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL"
   template {
-    service_account                  = google_service_account.runtime.email
+    service_account                  = google_service_account.ui.email
     timeout                          = "3600s"
     max_instance_request_concurrency = 80
     containers {
@@ -192,8 +250,9 @@ resource "google_cloud_run_v2_job" "backup" {
   template {
     template {
       service_account = google_service_account.runtime.email
-      timeout         = "14400s"
-      max_retries     = 0
+      # Runs checkpoint their progress, so a timeout or retry resumes rather than restarts.
+      timeout     = "${var.job_timeout_hours * 3600}s"
+      max_retries = var.job_max_retries
       containers {
         image   = var.image
         command = ["python"]
@@ -224,17 +283,22 @@ resource "google_cloud_run_v2_job" "backup" {
           name  = "GOOGLE_CLOUD_PROJECT"
           value = var.project_id
         }
+        env {
+          name  = "BGB_OBJECT_RETENTION_DAYS"
+          value = tostring(var.object_retention_days)
+        }
       }
     }
   }
   depends_on = [google_project_service.required]
 }
 
-resource "google_cloud_run_v2_job_iam_member" "runtime_invokes" {
+# The UI starts the job with argument overrides ("Run now", rebuild, prune, delete).
+resource "google_cloud_run_v2_job_iam_member" "ui_runs_job" {
   name     = google_cloud_run_v2_job.backup.name
   location = var.region
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:${google_service_account.runtime.email}"
+  role     = "roles/run.jobsExecutorWithOverrides"
+  member   = "serviceAccount:${google_service_account.ui.email}"
 }
 
 resource "google_cloud_run_v2_job_iam_member" "scheduler_invokes" {

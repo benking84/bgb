@@ -1,4 +1,5 @@
 import hashlib
+import io
 
 from bgb.models import Job
 from bgb.sources.drive import FOLDER, DriveSource
@@ -110,13 +111,13 @@ class FakeDrive:
     def download(self, user, file_id):
         self.downloads.append(file_id)
         if file_id in {"handbook", "shared-pdf"}:
-            return PDF
+            return io.BytesIO(PDF)
         raise FileNotFoundError(file_id)
 
     def export(self, user, file_id, mime):
         self.exports.append(file_id)
         assert mime.endswith("spreadsheetml.sheet")
-        return SHEET
+        return io.BytesIO(SHEET)
 
 
 def test_drive_exports_docs_skips_unsupported_and_lists_shared_once():

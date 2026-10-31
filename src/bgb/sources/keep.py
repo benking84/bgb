@@ -7,8 +7,10 @@ from bgb.models import Job, Scan
 class KeepSource:
     """Placeholder for Google Keep.
 
-    Keep has no supported Workspace API for domain-wide export. The plugin is
-    registered so a future source can be added without changing the engine.
+    Google's Keep API is open to enterprise admins through domain-wide
+    delegation, but its notes omit labels, colours, reminders, and pinned or
+    archived state, so a restore would lose them. The plugin is registered so
+    a Keep source can be added without changing the engine.
     """
 
     name = "keep"
@@ -16,6 +18,6 @@ class KeepSource:
 
     def scan(self, job: Job) -> Scan:
         raise UnsupportedSource(
-            "Google Keep has no supported Workspace API for domain-wide backup. "
-            "Google Takeout is a one-shot export, not a source this service can poll."
+            "Google Keep is not supported yet. Google's Keep API omits labels, colours, reminders, "
+            "and pinned or archived state, so a backup from it would not restore those."
         )

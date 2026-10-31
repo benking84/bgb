@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import random
 import time
 
 from bgb.errors import ConfigError, SecretNotFound
@@ -15,7 +16,32 @@ ADMIN_SCOPES = [DIRECTORY_SCOPE]
 OAUTH_SCOPES = GMAIL_SCOPES + DRIVE_SCOPES + CONTACTS_SCOPES
 
 
-def _execute(build_request, attempts: int = 5):
+_RATE_LIMIT_REASONS = {"userRateLimitExceeded", "rateLimitExceeded", "quotaExceeded"}
+
+
+def _retryable(exc) -> bool:
+    """429 and 5xx always; 403 only when Google says it is a rate limit, not a permission error."""
+    status = getattr(exc.resp, "status", None)
+    if status in {429, 500, 502, 503, 504}:
+        return True
+    if status != 403:
+        return False
+    try:
+        error = json.loads(exc.content.decode()).get("error") or {}
+    except (AttributeError, UnicodeDecodeError, ValueError):
+        return False
+    reasons = {row.get("reason") for row in error.get("errors") or []}
+    return bool(reasons & _RATE_LIMIT_REASONS) or error.get("status") == "RESOURCE_EXHAUSTED"
+
+
+def _delay(exc, attempt: int) -> float:
+    retry_after = (getattr(exc, "resp", None) or {}).get("retry-after")
+    if retry_after and str(retry_after).isdigit():
+        return min(float(retry_after), 120.0)
+    return min(2**attempt, 64) * (0.5 + random.random() / 2)
+
+
+def _execute(build_request, attempts: int = 8):
     from googleapiclient.errors import HttpError
 
     last = None
@@ -24,9 +50,8 @@ def _execute(build_request, attempts: int = 5):
             return build_request().execute()
         except HttpError as exc:
             last = exc
-            status = getattr(exc.resp, "status", None)
-            if status in {429, 500, 503} and attempt + 1 < attempts:
-                time.sleep(min(2**attempt, 16))
+            if _retryable(exc) and attempt + 1 < attempts:
+                time.sleep(_delay(exc, attempt))
                 continue
             raise
     raise last  # pragma: no cover
@@ -172,11 +197,18 @@ class GoogleGmailClient:
             "subject": subject,
         }
 
-    def get_raw(self, user: str, message_id: str) -> bytes:
+    def get_message(self, user: str, message_id: str) -> dict:
+        """One raw fetch returns the bytes and the labels, so a backup skips the metadata call."""
         response = _execute(
             lambda: self._svc(user).users().messages().get(userId=user, id=message_id, format="raw")
         )
-        return _b64(response["raw"])
+        return {
+            "id": response["id"],
+            "raw": _b64(response["raw"]),
+            "labelIds": response.get("labelIds") or [],
+            "internalDate": response.get("internalDate"),
+            "snippet": response.get("snippet") or "",
+        }
 
     def list_history(self, user: str, start: str):
         from googleapiclient.errors import HttpError
@@ -309,26 +341,41 @@ class GoogleDriveClient:
                 raise FileNotFoundError(file_id) from exc
             raise
 
-    def download(self, user: str, file_id: str) -> bytes:
+    def download(self, user: str, file_id: str) -> "MediaStream":
+        request = self._svc(user).files().get_media(fileId=file_id, supportsAllDrives=True)
+        return MediaStream(request)
+
+    def export(self, user: str, file_id: str, mime: str) -> "MediaStream":
+        request = self._svc(user).files().export_media(fileId=file_id, mimeType=mime)
+        return MediaStream(request)
+
+
+class MediaStream(io.RawIOBase):
+    """A Drive download read in chunks. Only one chunk is held in memory at a time."""
+
+    def __init__(self, request, chunksize: int = 8 * 1024 * 1024):
         from googleapiclient.http import MediaIoBaseDownload
 
-        request = self._svc(user).files().get_media(fileId=file_id, supportsAllDrives=True)
-        return _download(request)
+        self._sink = io.BytesIO()
+        self._downloader = MediaIoBaseDownload(self._sink, request, chunksize=chunksize)
+        self._buffer = bytearray()
+        self._done = False
 
-    def export(self, user: str, file_id: str, mime: str) -> bytes:
-        request = self._svc(user).files().export_media(fileId=file_id, mimeType=mime)
-        return _download(request)
+    def readable(self) -> bool:
+        return True
 
-
-def _download(request) -> bytes:
-    from googleapiclient.http import MediaIoBaseDownload
-
-    buffer = io.BytesIO()
-    downloader = MediaIoBaseDownload(buffer, request, chunksize=8 * 1024 * 1024)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    return buffer.getvalue()
+    def read(self, size: int = -1) -> bytes:
+        # Fill to the requested size so the engine's fixed-size blocks stay aligned.
+        while not self._done and (size < 0 or len(self._buffer) < size):
+            _, self._done = self._downloader.next_chunk(num_retries=8)
+            self._buffer += self._sink.getvalue()
+            self._sink.seek(0)
+            self._sink.truncate()
+        if size < 0:
+            size = len(self._buffer)
+        out = bytes(self._buffer[:size])
+        del self._buffer[:size]
+        return out
 
 
 class GoogleDirectory:

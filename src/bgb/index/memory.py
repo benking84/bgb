@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from pathlib import Path
 
 from bgb.errors import NotFound
@@ -21,6 +22,8 @@ class MemoryIndex:
         self.by_volume: dict[tuple[str, str], set[str]] = {}
         self.blocksets: dict[tuple[str, str], list[str]] = {}
         self.volumes: dict[tuple[str, str], VolumeRef] = {}
+        self.checkpoints: dict[str, dict[str, FileEntry]] = {}
+        self.leases: dict[str, dict] = {}
         self.settings = Settings()
         self._lock = threading.RLock()
 
@@ -205,6 +208,47 @@ class MemoryIndex:
             self.by_volume = {key: value for key, value in self.by_volume.items() if key[0] != job_id}
             self.blocksets = {key: value for key, value in self.blocksets.items() if key[0] != job_id}
             self.volumes = {key: value for key, value in self.volumes.items() if key[0] != job_id}
+            self.checkpoints.pop(job_id, None)
+
+    def missing_blocks(self, job_id: str, hashes: list[str]) -> list[str]:
+        with self._lock:
+            return [digest for digest in hashes if (job_id, digest) not in self.blocks]
+
+    def put_checkpoint(self, job_id: str, entries: list[FileEntry]) -> None:
+        with self._lock:
+            rows = self.checkpoints.setdefault(job_id, {})
+            for entry in entries:
+                rows[entry.source_id] = entry
+
+    def list_checkpoint(self, job_id: str) -> list[FileEntry]:
+        with self._lock:
+            return list(self.checkpoints.get(job_id, {}).values())
+
+    def clear_checkpoint(self, job_id: str) -> None:
+        with self._lock:
+            self.checkpoints.pop(job_id, None)
+
+    def acquire_lease(self, job_id: str, holder: str, ttl: float) -> bool:
+        """Take or renew the job's lease. Fails while another holder's lease is unexpired."""
+        with self._lock:
+            now = time.time()
+            current = self.leases.get(job_id)
+            if current and current["holder"] != holder and current["expires"] > now:
+                return False
+            self.leases[job_id] = {"holder": holder, "expires": now + ttl}
+            return True
+
+    def release_lease(self, job_id: str, holder: str) -> None:
+        with self._lock:
+            if (self.leases.get(job_id) or {}).get("holder") == holder:
+                self.leases.pop(job_id, None)
+
+    def lease_holder(self, job_id: str) -> str | None:
+        with self._lock:
+            current = self.leases.get(job_id)
+            if current and current["expires"] > time.time():
+                return current["holder"]
+            return None
 
     def get_settings(self) -> Settings:
         with self._lock:
@@ -216,7 +260,11 @@ class MemoryIndex:
 
 
 class FileIndex(MemoryIndex):
-    """JSON snapshot of MemoryIndex for local dev. Production uses FirestoreIndex."""
+    """JSON snapshot of MemoryIndex for local dev. Production uses FirestoreIndex.
+
+    Leases are not saved: they only coordinate threads in this process, and a
+    lease left behind by a stopped dev server would block the next one.
+    """
 
     def __init__(self, path: Path):
         super().__init__()
@@ -242,6 +290,9 @@ class FileIndex(MemoryIndex):
                     for (job_id, blockset_id), hashes in self.blocksets.items()
                 ],
                 "volumes": [dict(volume.to_dict(), job_id=job_id) for (job_id, _), volume in self.volumes.items()],
+                "checkpoints": {
+                    job_id: [entry.to_dict() for entry in rows.values()] for job_id, rows in self.checkpoints.items()
+                },
             }
         temporary = self.path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(payload), encoding="utf-8")
@@ -270,3 +321,5 @@ class FileIndex(MemoryIndex):
         for row in payload.get("volumes") or []:
             volume = from_dict(VolumeRef, row)
             self.volumes[(row["job_id"], volume.id)] = volume
+        for job_id, rows in (payload.get("checkpoints") or {}).items():
+            self.checkpoints[job_id] = {row["source_id"]: from_dict(FileEntry, row) for row in rows}

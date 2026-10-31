@@ -11,6 +11,8 @@ class GmailSource:
 
     Messages are addressed by id, so label changes do not re-read the body.
     Incremental runs use users.history when the stored history id is still valid.
+    New messages are read with one raw fetch, which also returns labels and date,
+    so a full scan lists ids only. Only label-only changes call the metadata endpoint.
     """
 
     name = "gmail"
@@ -47,9 +49,7 @@ class GmailSource:
         token = None
         while True:
             ids, token = self.client.list_message_ids(user, token)
-            for message_id in ids:
-                meta = self.client.get_metadata(user, message_id)
-                objects.append(self._object(user, meta))
+            objects.extend(self._object(user, {"id": message_id}) for message_id in ids)
             if not token:
                 break
         return ScopeScan(scope=f"gmail:{user}", mode="full", objects=objects)
@@ -67,7 +67,10 @@ class GmailSource:
             for message_id in record.get("label_changed") or []:
                 if message_id not in deleted and message_id not in state:
                     state[message_id] = "labels"
-        objects = [self._object(user, self.client.get_metadata(user, message_id)) for message_id in state]
+        objects = [
+            self._object(user, self.client.get_metadata(user, message_id) if kind == "labels" else {"id": message_id})
+            for message_id, kind in state.items()
+        ]
         deleted_ids = [f"gmail:{user}:{message_id}" for message_id in deleted]
         return ScopeScan(
             scope=f"gmail:{user}",
@@ -77,25 +80,47 @@ class GmailSource:
         )
 
     def _object(self, user: str, meta: dict) -> SourceObject:
+        """Build the object. Fields missing from ``meta`` are filled when the body is read."""
         message_id = meta["id"]
-
-        def open_raw(owner: str = user, mid: str = message_id):
-            return io.BytesIO(self.client.get_raw(owner, mid))
-
-        return SourceObject(
+        obj = SourceObject(
             source_id=f"gmail:{user}:{message_id}",
             scope=f"gmail:{user}",
             path=f"gmail/{user}/messages/{message_id}.eml",
             revision=message_id,
             mtime=_from_millis(meta.get("internalDate")),
-            metadata={
-                "subject": meta.get("subject") or "",
-                "labels": list(meta.get("labelIds") or []),
-                "snippet": meta.get("snippet") or "",
-                "user": user,
-            },
-            opener=open_raw,
+            metadata=_metadata(user, meta) if "labelIds" in meta else {},
+            opener=None,
         )
+
+        def open_raw(owner: str = user, mid: str = message_id):
+            message = self.client.get_message(owner, mid)
+            raw = message["raw"]
+            obj.metadata.update(_metadata(owner, dict(message, subject=_subject(raw))))
+            obj.mtime = obj.mtime or _from_millis(message.get("internalDate"))
+            return io.BytesIO(raw)
+
+        obj.opener = open_raw
+        return obj
+
+
+def _metadata(user: str, meta: dict) -> dict:
+    return {
+        "subject": meta.get("subject") or "",
+        "labels": list(meta.get("labelIds") or []),
+        "snippet": meta.get("snippet") or "",
+        "user": user,
+    }
+
+
+def _subject(raw: bytes) -> str:
+    from email.header import decode_header, make_header
+    from email.parser import BytesHeaderParser
+
+    try:
+        value = BytesHeaderParser().parsebytes(raw[:65536]).get("Subject") or ""
+        return str(make_header(decode_header(value)))
+    except Exception:
+        return ""
 
 
 def _from_millis(value) -> str | None:

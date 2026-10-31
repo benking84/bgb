@@ -40,6 +40,12 @@ def main(argv: list[str] | None = None) -> None:
     rebuild = sub.add_parser("rebuild", help="Rebuild the index from stored volumes")
     rebuild.add_argument("--job-id", required=True)
 
+    prune = sub.add_parser("prune", help="Delete stored objects the index does not reference")
+    prune.add_argument("--job-id", required=True)
+
+    delete_job = sub.add_parser("delete-job", help="Delete a job, its index records, and its stored objects")
+    delete_job.add_argument("--job-id", required=True)
+
     oauth = sub.add_parser("oauth-url", help="Print a Google OAuth consent URL for a single user")
     oauth.add_argument("--client-id", required=True)
     oauth.add_argument("--redirect-uri", required=True)
@@ -96,6 +102,12 @@ def main(argv: list[str] | None = None) -> None:
         return
     if args.cmd == "rebuild":
         print(json.dumps(runtime.engine.rebuild(args.job_id), indent=2))
+        return
+    if args.cmd == "prune":
+        print(json.dumps({"removed": runtime.engine.prune_orphans(args.job_id)}, indent=2))
+        return
+    if args.cmd == "delete-job":
+        print(json.dumps(runtime.delete_job(args.job_id), indent=2))
         return
     if args.cmd == "oauth-exchange":
         _exchange(runtime, args)

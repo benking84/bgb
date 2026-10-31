@@ -181,8 +181,10 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
 
     @app.delete("/api/jobs/{job_id}")
     def delete_job(job_id: str):
-        _rt(app).delete_job(job_id)
-        return {"deleted": job_id}
+        _rt(app).index.get_job(job_id)
+        if _rt(app).in_backup_job(["delete-job", "--job-id", job_id]):
+            return {"deleted": job_id, "queued": True}
+        return _rt(app).delete_job(job_id)
 
     @app.post("/api/jobs/{job_id}/run")
     def run_job(job_id: str, wait: bool = False):
@@ -238,6 +240,8 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
     @app.post("/api/jobs/{job_id}/prune")
     def prune_job(job_id: str):
         _rt(app).index.get_job(job_id)
+        if _rt(app).in_backup_job(["prune", "--job-id", job_id]):
+            return {"removed": [], "queued": True}
         removed = _rt(app).engine.prune_orphans(job_id)
         _rt(app).flush()
         return {"removed": removed}
@@ -245,8 +249,9 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
     @app.post("/api/jobs/{job_id}/rebuild")
     def rebuild_job(job_id: str):
         _rt(app).index.get_job(job_id)
-        report = _rt(app).engine.rebuild(job_id)
-        return report
+        if _rt(app).in_backup_job(["rebuild", "--job-id", job_id]):
+            return {"queued": True}
+        return _rt(app).engine.rebuild(job_id)
 
     web_root = os.environ.get("BGB_WEB_ROOT", "")
     if web_root and Path(web_root).is_dir():

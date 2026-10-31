@@ -31,3 +31,10 @@ class UnsupportedSource(BgbError):
 class SecretNotFound(BgbError):
     status = 404
     code = "secret_not_found"
+
+
+class Retained(BgbError):
+    """The store refused a delete because the object is still under its retention period."""
+
+    status = 409
+    code = "retained"

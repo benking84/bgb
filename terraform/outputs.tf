@@ -13,3 +13,16 @@ output "bucket" {
 output "runtime_service_account" {
   value = google_service_account.runtime.email
 }
+
+output "ui_service_account" {
+  value = google_service_account.ui.email
+}
+
+output "delegate_service_account" {
+  description = "Put this in Settings → service account email, and authorize its client id for domain-wide delegation."
+  value       = google_service_account.delegate.email
+}
+
+output "delegate_client_id" {
+  value = google_service_account.delegate.unique_id
+}

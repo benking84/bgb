@@ -2,7 +2,7 @@
 
 bgb ("baby got back") backs up Google Workspace. Files are split into fixed-size blocks, identical blocks are stored once, volumes are compressed, and each object and restored file is checked with SHA-256. Versions follow a retention policy. Restore rebuilds a file from its block list.
 
-Gmail and Google Drive (including shared drives) are the sources that matter. Contacts uses the same plugin interface. Google Keep is registered and refused, because Keep has no supported Workspace API. Backup bytes go to Cloud Storage. Job config, run history, and the block index go to Firestore. Workspace credentials go to Secret Manager. Cloud Storage and Firestore encrypt data at rest. There is no application-level encryption key.
+Gmail and Google Drive (including shared drives) are the sources that matter. Contacts uses the same plugin interface. Google Keep is registered and refused: Google's Keep API is open to admins through domain-wide delegation, but it omits labels, colours, reminders, and pinned or archived state, so a restore would lose them. Backup bytes go to Cloud Storage. Job config, run history, and the block index go to Firestore. Workspace credentials go to Secret Manager. Cloud Storage and Firestore encrypt data at rest. There is no application-level encryption key.
 
 The design is described in [REVIEW.md](REVIEW.md).
 
@@ -55,7 +55,7 @@ Set the admin email in Settings. Backups impersonate each selected user. Shared 
 
 Two ways to hold the service account:
 
-- **Keyless (preferred on Cloud Run).** Use the Cloud Run runtime service account itself. Terraform grants it `roles/iam.serviceAccountTokenCreator` on itself. Put its email in Settings → service account email. Domain-wide delegation must authorize that account's client id.
+- **Keyless (preferred on Cloud Run).** Terraform creates `bgb-delegate`, an account with no Google Cloud roles, and lets the backup job and the UI sign delegation tokens as it. Put its email (the `delegate_service_account` output) in Settings → service account email, and authorize its client id (`delegate_client_id`) for domain-wide delegation. New Google Cloud organisations block JSON key creation by default, so this is usually the only option.
 - **JSON key.** Store the key as a Secret Manager version of `bgb-workspace-sa` (Terraform creates the secret). The key is used only to mint delegated tokens.
 
 OAuth is for a single user, without admin delegation. Create an OAuth client, then:
@@ -85,7 +85,15 @@ terraform -chdir=terraform apply \
   -var image=$IMAGE
 ```
 
-The image value is an input. The container listens on `$PORT` and serves the API and the exported UI. The backup job uses the same image and runs `python -m bgb run-due`. Cloud Scheduler calls that job every 15 minutes. "Run now" in the UI starts the same job.
+The image value is an input. The container listens on `$PORT` and serves the API and the exported UI. The backup job uses the same image and runs `python -m bgb run-due`. Cloud Scheduler calls that job every 15 minutes. "Run now" in the UI starts the same job, and so do delete, prune, and rebuild: they run in the job because only the job's account (`bgb-run`) may delete stored objects. The UI's account (`bgb-ui`) can only read them.
+
+A run holds a lease on its job in Firestore and renews it every minute, so two executions never work on one job at once. A run that is killed frees its lease within 30 minutes; the next run closes it as abandoned. Runs save their progress at least every 5 minutes, so a timeout or retry resumes instead of starting over. The job's timeout defaults to 24 hours with 3 retries.
+
+Backups are protected against an attacker who gets the app's credentials:
+
+- The bucket has a retention policy (`object_retention_days`, default 30). No account can delete or replace an object younger than that. bgb defers compaction and deletes until objects are old enough. Set `lock_retention=true` to make the period permanent. Locking is irreversible.
+- Soft delete keeps deleted objects restorable for `soft_delete_days` (default 90). No bgb account can change bucket settings.
+- `backup_project_id` puts the bucket in a separate project, so owners of the app project cannot reach it.
 
 Optional Cloud KMS key on the bucket, off unless you set it:
 
@@ -98,7 +106,7 @@ terraform -chdir=terraform apply \
   -var kms_key_name=projects/$PROJECT/locations/$REGION/keyRings/RING/cryptoKeys/KEY
 ```
 
-When `kms_key_name` is empty, the bucket uses Google-managed encryption. When it is set, Terraform enables the Cloud KMS API and grants the Cloud Storage service agent and the runtime service account `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key.
+When `kms_key_name` is empty, the bucket uses Google-managed encryption. When it is set, Terraform enables the Cloud KMS API and grants the Cloud Storage service agent, the job account, and the UI account `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key.
 
 The Firestore `(default)` database can only be created once per project. If it already exists, import it before apply:
 
@@ -106,7 +114,7 @@ The Firestore `(default)` database can only be created once per project. If it a
 terraform -chdir=terraform import google_firestore_database.default projects/$PROJECT/databases/'(default)'
 ```
 
-After apply, authorize domain-wide delegation for the runtime service account and open the service URL. The service requires authentication unless `allow_unauthenticated=true`. If you use a JSON key instead of keyless delegation, add it as a version of `bgb-workspace-sa`.
+After apply, authorize domain-wide delegation for `bgb-delegate` and open the service URL. The service requires authentication unless `allow_unauthenticated=true`. If you use a JSON key instead of keyless delegation, add it as a version of `bgb-workspace-sa`.
 
 | Variable | Meaning |
 | --- | --- |
@@ -117,6 +125,12 @@ After apply, authorize domain-wide delegation for the runtime service account an
 | `firestore_location` | Firestore location (default `nam5`) |
 | `kms_key_name` | Optional CMEK key for the bucket |
 | `allow_unauthenticated` | When true, the UI service is public |
+| `backup_project_id` | Optional separate project for the bucket (default: `project_id`) |
+| `object_retention_days` | Bucket retention period in days (default 30; 0 turns it off) |
+| `lock_retention` | Lock the retention policy permanently (default false; irreversible) |
+| `soft_delete_days` | Days deleted objects stay restorable, 7 to 90 (default 90) |
+| `job_timeout_hours` | Backup task timeout, up to 168 (default 24) |
+| `job_max_retries` | Retries for a failed task; each resumes from the last checkpoint (default 3) |
 
 Local overrides, if you point a machine at a real project:
 
@@ -133,7 +147,7 @@ Local overrides, if you point a machine at a real project:
 | `BGB_API_TOKEN` | optional bearer token |
 | `PORT` | listen port |
 
-Volumes are buffered in memory. Keep the volume size at or under 128 MiB. The default is 50 MiB. Block size defaults to 100 KiB.
+Volumes are buffered in memory. Keep the volume size at or under 128 MiB. The default is 50 MiB. Block size defaults to 100 KiB. Drive files are streamed in 8 MiB chunks, so file size does not raise memory use.
 
 ## Tests
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from bgb.errors import NotFound
@@ -225,6 +226,67 @@ class FirestoreIndex:
             snap.reference.delete()
         self._delete_collection(job.collection("blocks"))
         self._delete_collection(job.collection("volumes"))
+        self._delete_collection(job.collection("checkpoint"))
+
+    def missing_blocks(self, job_id: str, hashes: list[str]) -> list[str]:
+        col = self._job(job_id).collection("blocks")
+        missing: list[str] = []
+        for start in range(0, len(hashes), 300):
+            chunk = hashes[start : start + 300]
+            found = {snap.id for snap in self.db.get_all([col.document(digest) for digest in chunk]) if snap.exists}
+            missing.extend(digest for digest in chunk if digest not in found)
+        return missing
+
+    def put_checkpoint(self, job_id: str, entries: list[FileEntry]) -> None:
+        col = self._job(job_id).collection("checkpoint")
+        self._batched_set(col, [(_entry_id(entry), entry.to_dict()) for entry in entries])
+
+    def list_checkpoint(self, job_id: str) -> list[FileEntry]:
+        return [
+            from_dict(FileEntry, snap.to_dict() or {})
+            for snap in self._job(job_id).collection("checkpoint").stream()
+        ]
+
+    def clear_checkpoint(self, job_id: str) -> None:
+        self._delete_collection(self._job(job_id).collection("checkpoint"))
+
+    def acquire_lease(self, job_id: str, holder: str, ttl: float) -> bool:
+        """Take or renew the job's lease in a transaction, so two executions cannot both hold it."""
+        from google.cloud import firestore
+
+        ref = self.db.collection("leases").document(job_id)
+
+        @firestore.transactional
+        def take(transaction) -> bool:
+            snap = ref.get(transaction=transaction)
+            now = time.time()
+            current = snap.to_dict() if snap.exists else None
+            if current and current.get("holder") != holder and float(current.get("expires") or 0) > now:
+                return False
+            transaction.set(ref, {"job_id": job_id, "holder": holder, "expires": now + ttl})
+            return True
+
+        return take(self.db.transaction())
+
+    def release_lease(self, job_id: str, holder: str) -> None:
+        from google.cloud import firestore
+
+        ref = self.db.collection("leases").document(job_id)
+
+        @firestore.transactional
+        def drop(transaction) -> None:
+            snap = ref.get(transaction=transaction)
+            if snap.exists and (snap.to_dict() or {}).get("holder") == holder:
+                transaction.delete(ref)
+
+        drop(self.db.transaction())
+
+    def lease_holder(self, job_id: str) -> str | None:
+        snap = self.db.collection("leases").document(job_id).get()
+        current = snap.to_dict() if snap.exists else None
+        if current and float(current.get("expires") or 0) > time.time():
+            return current.get("holder")
+        return None
 
     def get_settings(self) -> Settings:
         snap = self.db.collection("settings").document("global").get()

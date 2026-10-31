@@ -4,10 +4,11 @@ import logging
 import os
 import threading
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
-from bgb.engine import Engine, busy
-from bgb.errors import ConfigError, Conflict
+from bgb.engine import Engine
+from bgb.errors import ConfigError, Conflict, Retained
 from bgb.index.memory import FileIndex, MemoryIndex
 from bgb.models import Job, Run
 from bgb.schedule import is_due
@@ -29,6 +30,7 @@ class Runtime:
             index,
             volumes,
             sources_for=lambda job, settings: build_sources(job, settings, secrets),
+            min_object_age=timedelta(days=int(os.environ.get("BGB_OBJECT_RETENTION_DAYS") or 0)),
         )
 
     def flush(self) -> None:
@@ -36,9 +38,8 @@ class Runtime:
 
     def start_backup(self, job_id: str, *, wait: bool = False) -> Run:
         self.index.get_job(job_id)
-        runs = self.index.list_runs(job_id)
-        if runs and busy(runs[0]):
-            raise Conflict("a backup for this job is already running")
+        if self.index.lease_holder(job_id):
+            raise Conflict("a backup or maintenance task for this job is already running")
         run = Run(
             id=uuid.uuid4().hex,
             job_id=job_id,
@@ -51,7 +52,7 @@ class Runtime:
         cloud_job = os.environ.get("BGB_CLOUD_RUN_JOB", "").strip()
         if cloud_job and not wait:
             try:
-                _trigger_cloud_run_job(cloud_job, job_id, run.id)
+                _trigger_cloud_run_job(cloud_job, ["run", "--job-id", job_id, "--run-id", run.id])
             except Exception as exc:
                 run.status = "failed"
                 run.phase = "failed"
@@ -81,20 +82,42 @@ class Runtime:
         for job in self.index.list_jobs():
             if not job.enabled or not job.schedule:
                 continue
-            runs = self.index.list_runs(job.id)
-            if runs and busy(runs[0]):
+            if self.index.lease_holder(job.id):
                 continue
+            runs = self.index.list_runs(job.id)
             last = runs[0].started_at if runs else None
             if is_due(job.schedule, job.created_at or now_iso(), last, now):
-                started.append(self.engine.run_backup(job.id))
+                try:
+                    started.append(self.engine.run_backup(job.id))
+                except Conflict as exc:
+                    log.info("skipped job=%s: %s", job.id, exc)
         return started
 
-    def delete_job(self, job_id: str) -> None:
+    def in_backup_job(self, args: list[str]) -> bool:
+        """On Cloud Run, start the backup job with these CLI args and return True.
+
+        Deleting and rebuilding run there because only the job's account may
+        delete stored objects; the UI service's account can read them only.
+        """
+        cloud_job = os.environ.get("BGB_CLOUD_RUN_JOB", "").strip()
+        if not cloud_job:
+            return False
+        _trigger_cloud_run_job(cloud_job, args)
+        return True
+
+    def delete_job(self, job_id: str) -> dict:
+        """Delete the job and its stored objects. Objects still under bucket retention stay until it ends."""
         self.index.get_job(job_id)
-        for volume in self.index.list_volumes(job_id):
-            self.volumes.delete(volume.name)
-        self.index.delete_job(job_id)
+        retained = 0
+        with self.engine.leased(job_id):
+            for volume in self.index.list_volumes(job_id):
+                try:
+                    self.volumes.delete(volume.name)
+                except Retained:
+                    retained += 1
+            self.index.delete_job(job_id)
         self.flush()
+        return {"deleted": job_id, "objects_retained": retained}
 
 
 def build_runtime() -> Runtime:
@@ -137,7 +160,7 @@ def build_runtime() -> Runtime:
     return Runtime(index, volumes, secrets, data)
 
 
-def _trigger_cloud_run_job(name: str, job_id: str, run_id: str) -> None:
+def _trigger_cloud_run_job(name: str, args: list[str]) -> None:
     import google.auth
     from google.auth.transport.requests import AuthorizedSession
 
@@ -147,9 +170,7 @@ def _trigger_cloud_run_job(name: str, job_id: str, run_id: str) -> None:
         f"https://run.googleapis.com/v2/{name}:run",
         json={
             "overrides": {
-                "containerOverrides": [
-                    {"args": ["-m", "bgb", "run", "--job-id", job_id, "--run-id", run_id]}
-                ]
+                "containerOverrides": [{"args": ["-m", "bgb", *args]}]
             }
         },
         timeout=60,

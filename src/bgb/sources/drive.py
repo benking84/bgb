@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import io
-
 from bgb.models import Job, Scan, ScopeScan, SourceObject
 
 FOLDER = "application/vnd.google-apps.folder"
@@ -178,11 +176,10 @@ class DriveSource:
         used.add(path)
 
         def open_file(owner: str = actor, fid: str = file_id, exported=export):
+            # The client returns a stream, so a large file is never held in memory whole.
             if exported:
-                data = self.client.export(owner, fid, exported[0])
-            else:
-                data = self.client.download(owner, fid)
-            return io.BytesIO(data)
+                return self.client.export(owner, fid, exported[0])
+            return self.client.download(owner, fid)
 
         return (
             SourceObject(

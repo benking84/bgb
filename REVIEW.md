@@ -16,6 +16,14 @@ Volume payloads are zlib-compressed. Each stored object is hashed, and that hash
 
 Retention runs after a successful snapshot and always keeps the newest version. A job can keep a number of versions, a maximum age, or a bucket policy such as `1W:1D,4W:1W,12M:1M` (daily for a week, weekly for four weeks, monthly for twelve months). Months are 30 days and years are 365 days. Compaction rewrites a volume when at least 25% of its blocks are no longer referenced. Verify compares the bucket listing to the index and downloads sample volumes to recheck hashes. `bgb rebuild` reconstructs the index from the volumes, so the index is a cache of remote state.
 
+## Concurrency, resume, and retention
+
+Every operation that changes stored data (backup, retention, compaction, prune, rebuild, delete) holds the job's lease, a Firestore document taken in a transaction and renewed every minute. Without it, a second execution could compact away blocks that a running backup had just deduplicated against, and the running backup would then commit a fileset pointing at missing blocks. As a second guard, a run checks that every block it reused still exists before it saves the fileset. A killed run's lease expires within 30 minutes.
+
+A run saves a checkpoint each time it writes a volume, and at least every 5 minutes: the file entries whose blocks are all stored. The next run merges the checkpoint into the previous fileset, so files already stored are not read again. Compaction counts checkpointed blocks as live.
+
+The bucket's retention period is passed to the engine. Compaction skips volumes younger than that, and volumes released by retention are marked expired and deleted by a later run once they are old enough.
+
 The destination only needs put, get, list, and delete. Production uses Cloud Storage. Local development uses a directory of files and a JSON index that implement the same operations.
 
 ## Firestore
@@ -25,7 +33,7 @@ Jobs, settings, runs, fileset summaries, file entries, block lists, and the bloc
 Two workloads fit poorly, and they are still stored in Firestore:
 
 - A fileset is a full snapshot, so each version writes one document per file even when the body did not change. Compaction has to read every remaining entry to learn which blocks are still referenced. Firestore has no joins.
-- A backup is larger than one transaction (500 writes). A crash can upload a volume before the index records it. The volumes themselves are the recoverable copy. `bgb rebuild` reads them back.
+- A backup is larger than one transaction (500 writes). A crash can upload a volume before the index records it. The volumes themselves are the recoverable copy. `bgb rebuild` reads them back. It currently downloads every block volume and holds them in memory, so it suits small jobs only; rebuilding from the dindex and dlist volumes alone is the planned fix.
 
 If a domain outgrows that, keep jobs, runs, settings, and fileset summaries in Firestore, and move the block hash index and fileset entries to Cloud SQL so compaction is a query. Listing the bucket and downloading volumes to discover what is already stored would defeat the index.
 
@@ -33,9 +41,9 @@ If a domain outgrows that, keep jobs, runs, settings, and fileset summaries in F
 
 Gmail, Drive, and Contacts share one plugin interface: a scan returns a full listing or an incremental change set, and the engine turns that into blocks. Gmail uses the history id after the first scan. Drive backs up each user's My Drive, and each shared drive once as the admin. Docs, Sheets, Slides, and Drawings are exported. Forms, shortcuts, and other Docs types are skipped. Contacts stores one JSON object per person and follows the People API sync token.
 
-Google Keep is registered and refused. There is no supported Workspace API for it, and a Takeout export is not a source the service can poll.
+Google Keep is registered and refused. Google's Keep API is open to admins through domain-wide delegation, but it omits labels, colours, reminders, and pinned or archived state, so a restore from it would lose them.
 
-Authentication is a service account with domain-wide delegation, or an OAuth refresh token for a single user. On Cloud Run the runtime service account can sign the delegation JWT itself, so a JSON key is optional.
+Authentication is a service account with domain-wide delegation, or an OAuth refresh token for a single user. On Cloud Run the job and the UI sign the delegation JWT as `bgb-delegate`, an account with no Google Cloud roles, so a JSON key is optional.
 
 ## Scope
 

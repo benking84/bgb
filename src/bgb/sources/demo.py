@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 
 from bgb.models import Job
 from bgb.sources.contacts import ContactsSource
@@ -60,9 +61,9 @@ class DemoGmail:
         row = self.messages[user][message_id]
         return {key: row[key] for key in ("id", "labelIds", "internalDate", "snippet", "subject")}
 
-    def get_raw(self, user: str, message_id: str) -> bytes:
+    def get_message(self, user: str, message_id: str) -> dict:
         self.raw_reads.append((user, message_id))
-        return self.messages[user][message_id]["raw"]
+        return dict(self.get_metadata(user, message_id), raw=self.messages[user][message_id]["raw"])
 
     def list_history(self, user: str, start: str):
         if start != "10":
@@ -168,18 +169,18 @@ class DemoDrive:
             raise FileNotFoundError(file_id)
         return self.files[file_id]
 
-    def download(self, user: str, file_id: str) -> bytes:
+    def download(self, user: str, file_id: str) -> io.BytesIO:
         self.downloads.append(file_id)
         if file_id in {"ada-handbook", "shared-handbook"}:
-            return HANDBOOK
+            return io.BytesIO(HANDBOOK)
         if file_id == "grace-notes":
-            return NOTES
+            return io.BytesIO(NOTES)
         raise FileNotFoundError(file_id)
 
-    def export(self, user: str, file_id: str, mime: str) -> bytes:
+    def export(self, user: str, file_id: str, mime: str) -> io.BytesIO:
         self.exports.append(file_id)
         if file_id == "ada-budget":
-            return BUDGET_EXPORT
+            return io.BytesIO(BUDGET_EXPORT)
         raise FileNotFoundError(file_id)
 
 

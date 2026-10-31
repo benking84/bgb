@@ -23,9 +23,9 @@ class FakeGmail:
     def get_metadata(self, user: str, message_id: str) -> dict:
         return self.meta[user][message_id]
 
-    def get_raw(self, user: str, message_id: str) -> bytes:
+    def get_message(self, user: str, message_id: str) -> dict:
         self.raw_calls.append((user, message_id))
-        return self.raw[(user, message_id)]
+        return dict(self.meta[user][message_id], raw=self.raw[(user, message_id)])
 
     def list_history(self, user: str, start: str):
         if self.expired:
@@ -71,7 +71,11 @@ def test_full_scan_and_history_incremental():
     assert scope.mode == "incremental"
     assert scope.deleted_ids == ["gmail:ada@example.com:m1"]
     assert [item.source_id for item in scope.objects] == ["gmail:ada@example.com:m2"]
+    # New messages carry no labels until the raw fetch, which returns them with the body.
+    assert scope.objects[0].metadata == {}
+    scope.objects[0].opener()
     assert scope.objects[0].metadata["labels"] == ["INBOX", "STARRED"]
+    assert scope.objects[0].metadata["subject"] == "two"
 
     client.expired = True
     third = source.scan(Job(id="j", name="n", source_state={"gmail": second.state}, created_at=now_iso()))

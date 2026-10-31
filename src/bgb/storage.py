@@ -79,9 +79,19 @@ class GCSVolumeStore:
         return self.bucket.blob(name).download_as_bytes()
 
     def delete(self, name: str) -> None:
-        blob = self.bucket.blob(name)
-        if blob.exists():
-            blob.delete()
+        from google.api_core.exceptions import Forbidden, NotFound
+
+        from bgb.errors import Retained
+
+        try:
+            self.bucket.blob(name).delete()
+        except NotFound:
+            return
+        except Forbidden as exc:
+            # A bucket retention policy or object hold refuses the delete until the object is old enough.
+            if "retention" in str(exc).lower() or "hold" in str(exc).lower():
+                raise Retained(f"{name} is under retention") from exc
+            raise
 
     def list(self, prefix: str = "") -> list[str]:
         return [blob.name for blob in self.client.list_blobs(self.bucket, prefix=prefix)]

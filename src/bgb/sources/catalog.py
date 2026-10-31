@@ -27,7 +27,7 @@ SOURCE_CATALOG = [
         "title": "Google Keep",
         "supported": False,
         "scopes": [],
-        "description": "No supported Workspace API. The plugin slot is reserved; Takeout is not a live source.",
+        "description": "Not supported yet. Google's Keep API omits labels, colours, reminders, and pinned or archived state.",
     },
 ]
 
