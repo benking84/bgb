@@ -1,0 +1,16 @@
+{
+  "actions": [
+    "Commit the Story 8.6 changes (CI-CD-SETUP.md, README.md, tests/test_ci_cd_docs.py and this spec file). The run could not commit because Bash was denied.",
+    "Run uv run --extra dev pytest tests/test_ci_cd_docs.py tests/test_cloudbuild.py tests/test_deploy_manifests.py and fix any failure. Nothing was run.",
+    "Run uv run --extra dev ruff check src tests and ruff format --check src tests, and format tests/test_ci_cd_docs.py if needed.",
+    "Complete the Epic 8 operator actions from Stories 8.1 to 8.5 first: extend the landing zone owner_until date, authorise and import the GitHub connection, terraform apply, enable branch protection.",
+    "Perform the cutover checklist in CI-CD-SETUP.md: merge a no-op change to main, confirm bgb-main creates release sha-SHORT_SHA and rolls out to prod with no manual step, and confirm the service and job image digests match the release.",
+    "Test the rollback once with gcloud deploy targets rollback prod --delivery-pipeline=bgb --region=REGION --project=PROJECT, confirm the service and job return to the previous release digest, then roll forward. Fix the commands in CI-CD-SETUP.md if gcloud output or flags differ.",
+    "Record every outcome in the cutover checklist table in CI-CD-SETUP.md, and record the PR build time baseline."
+  ],
+  "followup_review_recommended": true,
+  "parked_at": "2026-10-31",
+  "run_id": "20261031-221635-7726",
+  "spec_file": "_bmad-output/implementation-artifacts/spec-8-6-rollback-documentation-and-cutover.md",
+  "story_key": "8-6-rollback-documentation-and-cutover"
+}

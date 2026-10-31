@@ -70,12 +70,19 @@ Set auth mode to OAuth and list that one user on the job. Scopes are Gmail, Driv
 
 ## Deploy
 
-Create the GCP project yourself. Terraform does not create it. Build a container image that Cloud Run can pull, then apply `terraform/`. That is the only deployment path. It enables APIs and creates the bucket, Firestore, Secret Manager secret, IAM, Cloud Run service, Cloud Run job, and Cloud Scheduler job.
+Create the GCP project yourself. Terraform does not create it. Ownership is split:
+
+- **Terraform owns infrastructure.** It enables APIs and creates the bucket, Firestore, Secret Manager secret, IAM, Artifact Registry, Cloud Build triggers, the Cloud Deploy pipeline, the Cloud Run service and job (once, with a bootstrap image), and the Cloud Scheduler job.
+- **Cloud Build and Cloud Deploy own the image and runtime configuration.** A merge to `main` builds the image, pushes it tagged by commit SHA and creates a Cloud Deploy release that references the image by digest. Runtime settings live in `deploy/`. Terraform ignores the service and job templates after creation.
+- **Running `terraform apply -var image=...` by hand is bootstrap only.** The image is used when the service and job are first created. Later images are deployed by the pipeline, not by Terraform.
+
+The pipeline, rollback, manual fallback and cutover steps are in [CI-CD-SETUP.md](CI-CD-SETUP.md).
 
 ```bash
 export PROJECT=your-project REGION=us-central1
 export BUCKET=your-unique-bucket
-export IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/bgb/bgb:latest
+# Bootstrap image only. This is also the Terraform default, so -var image can be omitted.
+export IMAGE=us-docker.pkg.dev/cloudrun/container/hello
 
 terraform -chdir=terraform init
 terraform -chdir=terraform apply \
@@ -85,7 +92,7 @@ terraform -chdir=terraform apply \
   -var image=$IMAGE
 ```
 
-The image value is an input. The container listens on `$PORT` and serves the API and the exported UI. The backup job uses the same image and runs `python -m bgb run-due`. Cloud Scheduler calls that job every 15 minutes. "Run now" in the UI starts the same job, and so do delete, prune, and rebuild: they run in the job because only the job's account (`bgb-run`) may delete stored objects. The UI's account (`bgb-ui`) can only read them.
+The image value is a bootstrap input, used only when the service and job are first created. The scheduled job fails until the first release, because the bootstrap image has no `python`. The container listens on `$PORT` and serves the API and the exported UI. The backup job uses the same image and runs `python -m bgb run-due`. Cloud Scheduler calls that job every 15 minutes. "Run now" in the UI starts the same job, and so do delete, prune, and rebuild: they run in the job because only the job's account (`bgb-run`) may delete stored objects. The UI's account (`bgb-ui`) can only read them.
 
 A run holds a lease on its job in Firestore and renews it every minute, so two executions never work on one job at once. A run that is killed frees its lease within 30 minutes; the next run closes it as abandoned. Runs save their progress at least every 5 minutes, so a timeout or retry resumes instead of starting over. The job's timeout defaults to 24 hours with 3 retries.
 
@@ -121,7 +128,7 @@ After apply, authorize domain-wide delegation for `bgb-delegate` and open the se
 | `project_id` | Existing GCP project |
 | `region` | Cloud Run, bucket, and Scheduler region (default `us-central1`) |
 | `bucket_name` | Globally unique Cloud Storage bucket |
-| `image` | Container image Cloud Run pulls |
+| `image` | Bootstrap Cloud Run image, used only at first creation. Cloud Deploy owns the image afterwards |
 | `firestore_location` | Firestore location (default `nam5`) |
 | `kms_key_name` | Optional CMEK key for the bucket |
 | `allow_unauthenticated` | When true, the UI service is public |
