@@ -20,7 +20,8 @@ variable "bucket_name" {
 
 variable "image" {
   type        = string
-  description = "Cloud Run image, for example REGION-docker.pkg.dev/PROJECT/bgb/bgb:latest"
+  description = "Bootstrap Cloud Run image. Cloud Deploy owns the running image after the first release (DEP-D1), so this is used only when the service and job are first created."
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
 variable "allow_unauthenticated" {

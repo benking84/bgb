@@ -1,0 +1,14 @@
+{
+  "actions": [
+    "Extend the Demo project owner_until date (2026-11-30) with the landing zone owners before applying, per epics.md D10.",
+    "If an Artifact Registry repository named bgb already exists in aviato-prod-demo-baby-got-back, import it: terraform import google_artifact_registry_repository.bgb projects/aviato-prod-demo-baby-got-back/locations/REGION/repositories/bgb.",
+    "Run terraform -chdir=terraform init -backend=false && terraform -chdir=terraform validate on a machine that can reach registry.terraform.io, and fix anything it reports. This was not run here because the sandbox blocked the provider download.",
+    "Run terraform plan against the existing deployment with the real variables and confirm no destroy or replace of the Cloud Run service, the job, the bucket or the Firestore database.",
+    "Run terraform apply, then confirm the six APIs are enabled, the bgb repository exists, and the bgb-cloudbuild and bgb-deployer service accounts exist with no keys."
+  ],
+  "followup_review_recommended": false,
+  "parked_at": "2026-10-31",
+  "run_id": "20261031-221635-7726",
+  "spec_file": "_bmad-output/implementation-artifacts/spec-8-1-terraform-foundations-for-the-pipeline.md",
+  "story_key": "8-1-terraform-foundations-for-the-pipeline"
+}

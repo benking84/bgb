@@ -32,6 +32,11 @@ locals {
     "storage.googleapis.com",
     "iam.googleapis.com",
     "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "clouddeploy.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "containerscanning.googleapis.com",
+    "cloudquotas.googleapis.com",
   ], var.kms_key_name == "" ? [] : ["cloudkms.googleapis.com"])
 }
 
@@ -233,6 +238,13 @@ resource "google_cloud_run_v2_service" "ui" {
       }
     }
   }
+  # DEP-D1: Cloud Deploy owns the running image and Cloud Run runtime config. Terraform creates
+  # this resource once with the bootstrap image, then ignores the template so a later apply
+  # does not revert what a release deployed.
+  lifecycle {
+    ignore_changes = [template, client, client_version]
+  }
+
   depends_on = [google_project_service.required, google_cloud_run_v2_job.backup]
 }
 
@@ -290,6 +302,11 @@ resource "google_cloud_run_v2_job" "backup" {
       }
     }
   }
+  # DEP-D1: see the lifecycle comment on google_cloud_run_v2_service.ui.
+  lifecycle {
+    ignore_changes = [template, client, client_version]
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -322,4 +339,117 @@ resource "google_cloud_scheduler_job" "run_due" {
     }
   }
   depends_on = [google_project_service.required, google_cloud_run_v2_job_iam_member.scheduler_invokes]
+}
+
+# Deployment pipeline (Epic 8). Roles and reasons are documented in CI-CD-SETUP.md.
+resource "google_artifact_registry_repository" "bgb" {
+  repository_id = "bgb"
+  location      = var.region
+  format        = "DOCKER"
+  description   = "bgb container images"
+
+  cleanup_policy_dry_run = false
+
+  cleanup_policies {
+    id     = "keep-recent-tagged"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 20
+    }
+  }
+
+  # KEEP wins over DELETE, so the newest 20 versions survive. Older tagged versions go after
+  # 30 days, which leaves recent rollback targets in place.
+  cleanup_policies {
+    id     = "delete-old-tagged"
+    action = "DELETE"
+    condition {
+      tag_state  = "TAGGED"
+      older_than = "2592000s"
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_service_account" "cloudbuild" {
+  account_id   = "bgb-cloudbuild"
+  display_name = "bgb Cloud Build"
+}
+
+resource "google_service_account" "deployer" {
+  account_id   = "bgb-deployer"
+  display_name = "bgb Cloud Deploy execution"
+}
+
+# bgb-cloudbuild: runs builds, pushes images and creates releases.
+resource "google_project_iam_member" "cloudbuild_logs" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_releaser" {
+  project = var.project_id
+  role    = "roles/clouddeploy.releaser"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.bgb.location
+  repository = google_artifact_registry_repository.bgb.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# Creating a release makes Cloud Deploy run as bgb-deployer.
+resource "google_service_account_iam_member" "cloudbuild_acts_as_deployer" {
+  service_account_id = google_service_account.deployer.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# bgb-deployer: executes Cloud Deploy rollouts onto Cloud Run.
+resource "google_project_iam_member" "deployer_job_runner" {
+  project = var.project_id
+  role    = "roles/clouddeploy.jobRunner"
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "deployer_service" {
+  name     = google_cloud_run_v2_service.ui.name
+  location = var.region
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_cloud_run_v2_job_iam_member" "deployer_job" {
+  name     = google_cloud_run_v2_job.backup.name
+  location = var.region
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "deployer_reader" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.bgb.location
+  repository = google_artifact_registry_repository.bgb.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+# Deploying a revision that runs as an app account needs actAs on that account, and on no other.
+resource "google_service_account_iam_member" "deployer_acts_as_app" {
+  for_each           = { run = google_service_account.runtime.name, ui = google_service_account.ui.name }
+  service_account_id = each.value
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+# Lets the job read its own quota usage (Story 10.2 pacing).
+resource "google_project_iam_member" "runtime_quota_viewer" {
+  project = var.project_id
+  role    = "roles/cloudquotas.viewer"
+  member  = "serviceAccount:${google_service_account.runtime.email}"
 }
