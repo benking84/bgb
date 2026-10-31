@@ -83,7 +83,7 @@ development_status:
   4-3-retention-finishes-young-deletes-later: backlog
   4-4-prune-and-job-delete-respect-the-protection-window: backlog
   4-5-the-bucket-and-index-are-protected-unlocked: backlog
-  4-6-lock-the-protection-after-sign-off: backlog
+  4-6-lock-the-protection-after-sign-off: blocked
   epic-4-retrospective: optional
 
   epic-5: backlog
