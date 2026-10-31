@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-31-2026 12:20
-last_updated: 10-31-2026 12:20
+last_updated: 10-31-2026 21:50
 project: bgb
 project_key: NOKEY
 tracking_system: file-system
@@ -51,7 +51,7 @@ development_status:
   epic-1-retrospective: optional
 
   epic-2: backlog
-  2-1-one-operation-per-job-at-a-time: backlog
+  2-1-one-operation-per-job-at-a-time: review
   2-2-runs-that-die-are-marked-timed-out: backlog
   2-3-maintenance-waits-for-the-run: backlog
   2-4-one-failing-job-never-stops-the-schedule: backlog
@@ -68,17 +68,18 @@ development_status:
   3-3-throttling-and-network-blips-do-not-fail-backups: backlog
   3-4-contacts-sync-handles-big-address-books-and-old-tokens: backlog
   3-5-every-shared-drive-is-listed-and-unreadable-ones-are-named: backlog
-  3-6-suspended-and-removed-users-keep-their-backup: backlog
+  3-6-departed-users-keep-their-backup-for-as-long-as-policy-requi: backlog
   3-7-every-user-means-every-user: backlog
   3-8-drive-items-are-tagged-per-user-with-no-re-download: backlog
   3-9-stable-unique-file-paths: backlog
   3-10-spam-and-trash-match-between-scans: backlog
   3-11-contacts-backups-keep-the-whole-contact: backlog
+  3-12-sharing-permissions-are-backed-up: backlog
   epic-3-retrospective: optional
 
   epic-4: backlog
   4-1-deletes-respect-a-minimum-object-age: backlog
-  4-2-compaction-leaves-young-volumes-alone: backlog
+  4-2-compaction-leaves-young-volumes-alone: review
   4-3-retention-finishes-young-deletes-later: backlog
   4-4-prune-and-job-delete-respect-the-protection-window: backlog
   4-5-the-bucket-and-index-are-protected-unlocked: backlog
@@ -86,10 +87,10 @@ development_status:
   epic-4-retrospective: optional
 
   epic-5: backlog
-  5-1-the-api-refuses-anyone-without-the-token: backlog
+  5-1-the-api-accepts-only-requests-that-came-through-iap: backlog
   5-2-admins-sign-in-through-iap: backlog
-  5-3-the-token-can-always-be-entered: backlog
-  5-4-run-now-works-in-the-cloud: backlog
+  5-3-the-console-shows-who-is-signed-in: backlog
+  5-4-run-now-works-in-the-cloud: review
   5-5-any-file-can-be-downloaded: backlog
   5-6-jobs-can-be-edited-a-field-at-a-time: backlog
   5-7-the-file-browser-handles-big-folders: backlog
@@ -99,7 +100,7 @@ development_status:
 
   epic-6: backlog
   6-1-every-run-logs-its-outcome: backlog
-  6-2-alerts-for-failed-timed-out-and-warning-runs: backlog
+  6-2-alerts-for-failed-stuck-and-warning-runs: backlog
   6-3-alerts-when-backups-go-quiet: backlog
   6-4-the-aviato-emailer-is-ready-but-switched-off: backlog
   epic-6-retrospective: optional
@@ -129,4 +130,12 @@ development_status:
   9-4-back-up-google-calendar: backlog
   9-5-back-up-google-tasks: backlog
   9-6-coverage-statement-in-the-ui-and-docs: backlog
+  9-7-back-up-google-forms: backlog
   epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-long-backups-resume-without-false-alarms: backlog
+  10-2-google-api-calls-stay-within-a-quota-budget: backlog
+  10-3-large-organisations-onboard-in-phases: backlog
+  10-4-know-how-long-onboarding-will-take: backlog
+  epic-10-retrospective: optional

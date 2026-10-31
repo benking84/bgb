@@ -32,3 +32,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  "integration: needs the Firestore emulator or another local service",
+  "p0: data loss, data exposure, or a backup that cannot be restored",
+]

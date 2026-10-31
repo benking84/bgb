@@ -1,10 +1,12 @@
-# Epic 9: Workspace Source Coverage: Keep, Chat, Calendar and Tasks
+# Epic 9: Workspace Source Coverage: Keep, Chat, Calendar, Tasks and Forms
 
 **Status:** Draft for review
 **Author:** Ben, with Claude
 **Date:** 2026-10-31
 **Scope:** bgb repository (`src/bgb/sources/`, `src/bgb/googleapi.py`, `web/`, `README.md`, `REVIEW.md`)
 **Related:** Epic 3 in `epics.md` (every user, mailbox and drive covered, failures named) sets the rules for warnings and failed users that these new sources must follow.
+**Depends on (from `epics.md`):** Epic 3 (Stories 3.1 and 3.2 carry-forward and pending-retry rules, Story 3.6 departed users and their configurable retention, which apply to every new source); Story 10.2 quota pacing, which every new source's API calls go through; and `epics.md` D6, so the catalog also declares the "restore" and "estimate" capability scopes. This needs Epic 3 and Story 10.2 built first, but not Epic 7.
+**Decision IDs:** a bare "D1" to "D4" in this file means this epic's decisions; decisions from `epics.md` are cited as "`epics.md` D6".
 **Builds on:** Epic 1 test conventions (priorities, recorded Google API responses in Story 1.6, integrity suite in Story 1.5). No dependency on Epic 8 beyond a working PR pipeline.
 
 ---
@@ -23,13 +25,13 @@ A bgb backup covers the Workspace data a user would expect to get back after an 
 | Workspace data | Today | Notes |
 |---|---|---|
 | Gmail | Backed up | `.eml` per message, history ID incremental |
-| Drive (My Drive, shared drives) | Backed up | Docs, Sheets, Slides, Drawings exported. Forms and shortcuts skipped and reported |
+| Drive (My Drive, shared drives) | Backed up | Docs, Sheets, Slides, Drawings exported. Shortcuts skipped and reported. Forms backed up through the Forms API (Story 9.7) |
 | Contacts | Backed up | People API connections, sync token incremental |
 | Keep | **Refused** | `catalog.py` marks it unsupported and `keep.py` raises `UnsupportedSource`. The architecture research branch (`_bmad-output/planning-artifacts/research/technical-google-workspace-backup-architecture-rev-2026-10-31/`) updated the reason: the API exists but omits labels, colours, reminders and pinned or archived state |
 | Chat | Not present | |
 | Calendar | Not present | |
 | Tasks | Not present | |
-| Forms (structure and responses) | Skipped by Drive | See open question Q3 |
+| Forms (structure and responses) | Skipped by Drive today | Story 9.7 (D3) |
 | Groups conversations, Sites, Vault holds | Not present | Out of scope, see section 6 |
 
 ## 3. What the APIs allow (checked 2026-10-31)
@@ -54,7 +56,9 @@ Checked against Google's developer documentation and, for Chat, secondary source
 | A3 | OAuth mode (single user) gets the same new scopes as service account mode, so a single user can back up their own Keep, Chat, Calendar and Tasks. | If a scope is not grantable in OAuth mode for this OAuth client, that source is marked service account only in the catalog. |
 | A4 | Shared objects are stored once. A Chat space with five members is backed up once, not five times, using the same pattern Drive uses for shared drives. Block level dedup would save the bytes anyway, but a single copy keeps the fileset readable. | None expected. |
 | D2 | **Decided 2026-10-31 (Ben): back up Keep with its gaps flagged**, rather than leave it unsupported. A partial copy of note content is better than none, provided nobody is led to think it is complete. | If customers rely on labels or reminders, Keep restore will not bring them back. Story 9.2 and Story 9.6 must say so wherever Keep is offered. |
-| D1 | **Decision needed:** should trashed Keep notes, deleted Chat messages (where the API exposes them) and deleted Tasks be kept in the backup until retention removes them? | Recommendation: yes. A backup that drops an item the moment it is deleted does not protect against deletion. Retention already handles old versions. |
+| D1 | **Decided 2026-10-31 (Ben): yes.** Trashed Keep notes, deleted Chat messages (where the API exposes them) and deleted Tasks stay in older backup versions until retention removes them, the same as Gmail and Drive. | A backup that drops an item the moment it is deleted does not protect against deletion. |
+| D3 | **Decided 2026-10-31 (Ben): back up Google Forms now** (Story 9.7), instead of skipping them in Drive. | Forms questions and responses become restorable as data; recreating a form from the backup is part of Epic 7 if needed. |
+| D4 | **Decided 2026-10-31 (Ben): the Keep and Chat spikes use two temporary users in the Aviato domain**, whose data is deleted afterwards. | No test tenant is needed for the spikes. |
 
 ## 5. Stories
 
@@ -67,7 +71,8 @@ Stories 9.1 and 9.2 should land first. Keep is the source the product currently 
 **As** an administrator, **I want** bgb to tell me exactly which scopes to authorise and to check them before a run, **so that** adding a source does not fail halfway through a backup with a permission error.
 
 **Acceptance criteria**
-- `SOURCE_CATALOG` lists Keep (supported), Chat, Calendar and Tasks, each with its scopes and a one line description that states what is not covered.
+- `SOURCE_CATALOG` lists Keep (supported), Chat, Calendar, Tasks and Forms, each with its scopes and a one line description that states what is not covered.
+- The catalog also lists capabilities that need scopes but are not sources: "restore" (Gmail import and Drive write, including shared drive creation and permissions, `epics.md` Story 7.1) and "estimate" (Admin SDK Reports usage, `epics.md` Story 10.4). The README delegation table includes them (`epics.md` D6).
 - `required_scopes()` returns the union for the selected sources, and the README delegation table is generated from, or checked against, the catalog in a unit test, so they cannot drift.
 - The settings connection probe checks every scope needed by the sources in saved jobs, by requesting a delegated token for the admin user with each scope, and reports the missing ones by name.
 - A job that selects a source whose scope is missing fails before any upload, with a message naming the scope and the Admin console path.
@@ -167,6 +172,26 @@ Stories 9.1 and 9.2 should land first. Keep is the source the product currently 
 - [ ] Update `job-form.tsx` and the run summary view.
 - [ ] Update the README and REVIEW.md.
 
+---
+
+### Story 9.7: Back up Google Forms
+
+**As** a Workspace user, **I want** my forms and their responses backed up, **so that** a deleted form or lost responses can be recovered.
+
+**Acceptance criteria**
+- Forms found by the Drive scan (`application/vnd.google-apps.form`) are no longer only skipped and reported: for each form, the Forms API structure (questions, settings) is stored as one JSON file and all responses as JSON, beside the form's Drive path.
+- Forms are read as their owner through domain-wide delegation, with the Forms read scopes for structure and responses added to the catalog (Story 9.1).
+- Later runs fetch only responses newer than the stored cursor, and refresh the structure when the form's revision changes.
+- Deleted forms and responses follow D1: they stay in older backup versions until retention removes them.
+- Form files and responses are attached to the same scope as the Drive file, so the Epic 3 carry-forward rules and Story 3.6 departed users apply.
+- The coverage statement (Story 9.6) says what is not covered, for example linked Sheets are backed up as Drive files, and file-upload answers are stored as Drive files only if the backup can read them.
+- Recorded response tests cover a form with several question types, responses across pages, a form with no responses, a deleted form, and 403 for a form the owner cannot read (P1).
+
+**Tasks**
+- [ ] Spike the Forms API with one of the D4 test users.
+- [ ] Add `GoogleFormsClient` and hook it into the Drive scan.
+- [ ] Update the catalog, docs and demo data.
+
 ## 6. Out of scope
 
 | Data | Why |
@@ -193,6 +218,6 @@ These edits are applied in Epic 1 alongside this draft.
 
 | ID | Question | Recommendation |
 |---|---|---|
-| Q1 | D1: keep deleted items until retention removes them? | Yes |
-| Q2 | Is there a test Workspace user available for the Keep and Chat spikes? Epic 1 D2 says there is no test tenant for nightly live tests. The spikes need one user (two for Chat) for a few hours, not an ongoing tenant. | Use two dummy users in the Aviato domain for the spikes, then delete their data |
-| Q3 | Should Forms (questions and responses) be backed up through the Forms API, instead of skipped by Drive? | Add as a later story if customers use Forms for anything they would need back |
+| Q1 | D1: keep deleted items until retention removes them? | **Decided: yes** (D1) |
+| Q2 | Is there a test Workspace user available for the Keep and Chat spikes? | **Decided: two temporary users in the Aviato domain** (D4) |
+| Q3 | Should Forms (questions and responses) be backed up through the Forms API, instead of skipped by Drive? | **Decided: yes, now** (D3, Story 9.7) |

@@ -1,0 +1,6 @@
+# Baby Got Back: new backup solution. Demo project
+# aviato-prod-demo-baby-got-back in experimental/demos.
+project_name: baby-got-back
+template: demo
+# Demo groups hold roles/editor until this date (30 days from onboarding).
+owner_until: "2026-11-30T00:00:00Z"

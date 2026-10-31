@@ -65,8 +65,8 @@ def _revision(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def make_engine(tmp: Path, *, block_size: int = 32, volume_size: int = 4096, source=None):
-    index = MemoryIndex()
+def make_engine(tmp: Path, *, block_size: int = 32, volume_size: int = 4096, source=None, index=None):
+    index = index if index is not None else MemoryIndex()
     settings = index.get_settings()
     settings.block_size = block_size
     settings.volume_size = volume_size
