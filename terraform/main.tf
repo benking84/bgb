@@ -11,10 +11,19 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 6.0"
+    }
   }
 }
 
 provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+provider "google-beta" {
   project = var.project_id
   region  = var.region
 }
@@ -43,6 +52,8 @@ locals {
     "iamcredentials.googleapis.com",
     "containerscanning.googleapis.com",
     "cloudquotas.googleapis.com",
+    "compute.googleapis.com",
+    "iap.googleapis.com",
   ], var.kms_key_name == "" ? [] : ["cloudkms.googleapis.com"])
 
   # Base Cloud Deploy parameters. Keys are the {{.KEY}} placeholders in deploy/*.yaml. A target's
@@ -54,7 +65,7 @@ locals {
     UI_SERVICE_ACCOUNT        = google_service_account.ui.email
     RUNTIME_SERVICE_ACCOUNT   = google_service_account.runtime.email
     BGB_OBJECT_RETENTION_DAYS = tostring(var.object_retention_days)
-    BGB_IAP_AUDIENCE          = var.iap_audience
+    BGB_IAP_AUDIENCE          = local.iap_audience
     JOB_TIMEOUT_SECONDS       = tostring(var.job_timeout_hours * 3600)
     JOB_MAX_RETRIES           = tostring(var.job_max_retries)
   }
@@ -264,18 +275,11 @@ resource "google_cloud_run_v2_service" "ui" {
   # this resource once with the bootstrap image, then ignores the template so a later apply
   # does not revert what a release deployed.
   lifecycle {
-    ignore_changes = [template, client, client_version]
+    # scaling: the API reports defaults Terraform did not set, which otherwise shows a diff on every plan.
+    ignore_changes = [template, client, client_version, scaling]
   }
 
   depends_on = [google_project_service.required, google_cloud_run_v2_job.backup]
-}
-
-resource "google_cloud_run_v2_service_iam_member" "public" {
-  count    = var.allow_unauthenticated ? 1 : 0
-  name     = google_cloud_run_v2_service.ui.name
-  location = var.region
-  role     = "roles/run.invoker"
-  member   = "allUsers"
 }
 
 resource "google_cloud_run_v2_job" "backup" {

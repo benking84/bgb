@@ -21,7 +21,7 @@ steps:
   # Fails the build on any _MODE other than pr or main. Without it a mistyped value would skip
   # every step and report a green PR check. Uses the uv image below, which the next step pulls anyway.
   - id: validate-mode
-    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim
+    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-trixie-slim
     entrypoint: bash
     args:
       - -c
@@ -34,7 +34,7 @@ steps:
   # Runs before any install, build or push so a misconfigured trigger can never push or release.
   # PR builds skip it: they never push. A main build fails unless both _MODE and the branch are main.
   - id: guard-release
-    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim
+    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-trixie-slim
     entrypoint: bash
     args:
       - -c
@@ -49,7 +49,7 @@ steps:
   # uv image pinned to the uv version in use locally (0.13.6) on Python 3.12, which matches the
   # Dockerfile runtime. --locked fails the build if uv.lock disagrees with pyproject.toml.
   - id: install-deps-python
-    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim
+    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-trixie-slim
     entrypoint: bash
     args:
       - -c
@@ -71,7 +71,7 @@ steps:
 
   # Same uv image as install-deps-python so the virtualenv in /workspace/.venv is reusable.
   - id: test-pr-only
-    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim
+    name: ghcr.io/astral-sh/uv:0.13.6-python3.12-trixie-slim
     entrypoint: bash
     args:
       - -c
@@ -154,7 +154,7 @@ steps:
   # Two merges close together make two builds and two releases (names differ by SHORT_SHA).
   # Cloud Deploy queues rollouts per target in release order, so the later release lands last.
   - id: create-release
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:502.0.0-slim
+    name: gcr.io/google.com/cloudsdktool/google-cloud-cli:591.0.0-slim
     entrypoint: bash
     args:
       - -c

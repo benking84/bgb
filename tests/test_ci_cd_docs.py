@@ -17,7 +17,7 @@ REQUIRED_HEADINGS = [
     "Running a trigger by hand",
     "Finding the live release",
     "Rollback",
-    "Manual fallback deploy",
+    "Redeploying a known-good build",
     "Troubleshooting the first build",
     "Adding an environment",
     "Cutover checklist",
@@ -69,12 +69,12 @@ def test_rollback_command_and_untested_status():
     assert "Test steps" in rollback
 
 
-def test_manual_fallback_uses_digest_and_warns():
-    fallback = _section("Manual fallback deploy")
-    assert "gcloud deploy releases create" in fallback
-    assert "@sha256:" in fallback
-    assert "skips the PR tests" in fallback
-    assert "latest" not in re.sub(r"never as `latest`", "", fallback)
+def test_no_workstation_deploy_path():
+    # epics.md D12: releases only come from Cloud Build and Cloud Deploy.
+    assert "## Manual fallback deploy" not in GUIDE
+    redeploy = _section("Redeploying a known-good build")
+    assert "bgb-main" in redeploy
+    assert "gcloud deploy releases create" not in redeploy
 
 
 def test_cutover_outcomes_not_recorded():
