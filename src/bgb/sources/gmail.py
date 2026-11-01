@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from bgb.models import Job, Scan, ScopeScan, SourceObject
 
@@ -36,7 +36,9 @@ class GmailSource:
             else:
                 history = self.client.list_history(user, cursor)
                 if history is None:
-                    warnings.append(f"Gmail history for {user} expired; scanning the mailbox")
+                    warnings.append(
+                        f"Gmail history for {user} expired; scanning the mailbox"
+                    )
                     scopes.append(self._full(user))
                 else:
                     scopes.append(self._incremental(user, history))
@@ -68,7 +70,12 @@ class GmailSource:
                 if message_id not in deleted and message_id not in state:
                     state[message_id] = "labels"
         objects = [
-            self._object(user, self.client.get_metadata(user, message_id) if kind == "labels" else {"id": message_id})
+            self._object(
+                user,
+                self.client.get_metadata(user, message_id)
+                if kind == "labels"
+                else {"id": message_id},
+            )
             for message_id, kind in state.items()
         ]
         deleted_ids = [f"gmail:{user}:{message_id}" for message_id in deleted]
@@ -119,7 +126,7 @@ def _subject(raw: bytes) -> str:
     try:
         value = BytesHeaderParser().parsebytes(raw[:65536]).get("Subject") or ""
         return str(make_header(decode_header(value)))
-    except Exception:
+    except Exception:  # noqa: BLE001 - a malformed header must never fail the backup
         return ""
 
 
@@ -127,7 +134,7 @@ def _from_millis(value) -> str | None:
     if not value:
         return None
     try:
-        stamp = datetime.fromtimestamp(int(value) / 1000, tz=timezone.utc)
+        stamp = datetime.fromtimestamp(int(value) / 1000, tz=UTC)
     except (TypeError, ValueError):
         return None
     return stamp.strftime("%Y-%m-%dT%H:%M:%S.%fZ")

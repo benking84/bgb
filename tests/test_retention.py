@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -12,7 +12,7 @@ def stamp(hours_ago: float, ident: str, now: datetime) -> Stamp:
 
 
 def test_smart_retention_buckets():
-    now = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
     # Ages chosen so the 1-day bucket drops the 6h copy and the outer frame drops 800d.
     ages = [
         (0, "newest"),
@@ -31,13 +31,15 @@ def test_smart_retention_buckets():
 
 
 def test_keep_versions_and_keep_time_never_drop_the_last_copy():
-    now = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 30, tzinfo=UTC)
     filesets = [stamp(24 * day, f"d{day}", now) for day in (1, 10, 40, 80)]
     assert filesets_to_delete(filesets, "versions:2", now) == ["d40", "d80"]
     assert filesets_to_delete(filesets, "time:30D", now) == ["d40", "d80"]
     only = [stamp(24 * 400, "ancient", now)]
     assert filesets_to_delete(only, "time:30D", now) == []
-    assert filesets_to_delete(only, "time:30D", now, allow_full_removal=True) == ["ancient"]
+    assert filesets_to_delete(only, "time:30D", now, allow_full_removal=True) == [
+        "ancient"
+    ]
 
 
 def test_retention_parser_rejects_bad_frames():
@@ -53,8 +55,8 @@ def test_retention_parser_rejects_bad_frames():
 
 def test_schedule_is_due_only_after_the_next_tick():
     created = "2026-10-30T00:00:00.000000Z"
-    now = datetime(2026, 10, 30, 0, 30, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 30, 0, 30, tzinfo=UTC)
     assert is_due("0 2 * * *", created, None, now) is False
-    later = datetime(2026, 10, 30, 3, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 10, 30, 3, 0, tzinfo=UTC)
     assert is_due("0 2 * * *", created, None, later) is True
     assert is_due("0 2 * * *", created, "2026-10-30T02:00:00.000000Z", later) is False

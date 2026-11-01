@@ -38,7 +38,10 @@ class FirestoreIndex:
         return from_dict(Job, snap.to_dict() or {})
 
     def list_jobs(self) -> list[Job]:
-        rows = [from_dict(Job, snap.to_dict() or {}) for snap in self.db.collection("jobs").stream()]
+        rows = [
+            from_dict(Job, snap.to_dict() or {})
+            for snap in self.db.collection("jobs").stream()
+        ]
         return sorted(rows, key=lambda job: job.created_at, reverse=True)
 
     def delete_job(self, job_id: str) -> None:
@@ -63,7 +66,9 @@ class FirestoreIndex:
     def list_runs(self, job_id: str) -> list[Run]:
         rows = [
             from_dict(Run, snap.to_dict() or {})
-            for snap in self.db.collection("runs").where("job_id", "==", job_id).stream()
+            for snap in self.db.collection("runs")
+            .where("job_id", "==", job_id)
+            .stream()
         ]
         return sorted(rows, key=lambda run: run.started_at or "", reverse=True)
 
@@ -72,7 +77,9 @@ class FirestoreIndex:
         ref.set(fileset.to_dict())
         col = ref.collection("entries")
         self._delete_collection(col)
-        self._batched_set(col, [( _entry_id(entry), entry.to_dict()) for entry in entries])
+        self._batched_set(
+            col, [(_entry_id(entry), entry.to_dict()) for entry in entries]
+        )
 
     def list_filesets(self, job_id: str) -> list[FileSet]:
         rows = [
@@ -98,10 +105,15 @@ class FirestoreIndex:
     ) -> tuple[list[FileEntry], str]:
         query = self._entries(job_id, fileset_id).order_by("path")
         if prefix:
-            query = query.where("path", ">=", prefix).where("path", "<", prefix + "\uf8ff")
+            query = query.where("path", ">=", prefix).where(
+                "path", "<", prefix + "\uf8ff"
+            )
         if cursor:
             query = query.where("path", ">", cursor)
-        rows = [from_dict(FileEntry, snap.to_dict() or {}) for snap in query.limit(limit + 1).stream()]
+        rows = [
+            from_dict(FileEntry, snap.to_dict() or {})
+            for snap in query.limit(limit + 1).stream()
+        ]
         page = rows[:limit]
         next_cursor = page[-1].path if len(rows) > limit and page else ""
         return page, next_cursor
@@ -113,7 +125,12 @@ class FirestoreIndex:
         ]
 
     def get_entry(self, job_id: str, fileset_id: str, path: str) -> FileEntry:
-        matches = list(self._entries(job_id, fileset_id).where("path", "==", path).limit(1).stream())
+        matches = list(
+            self._entries(job_id, fileset_id)
+            .where("path", "==", path)
+            .limit(1)
+            .stream()
+        )
         if not matches:
             raise NotFound(f"file {path} is not in this version")
         return from_dict(FileEntry, matches[0].to_dict() or {})
@@ -132,7 +149,9 @@ class FirestoreIndex:
             raise NotFound(f"block {digest} not found")
         return from_dict(BlockRef, snap.to_dict() or {})
 
-    def put_block(self, job_id: str, block: BlockRef, *, overwrite: bool = False) -> bool:
+    def put_block(
+        self, job_id: str, block: BlockRef, *, overwrite: bool = False
+    ) -> bool:
         ref = self._job(job_id).collection("blocks").document(block.hash)
         if overwrite:
             ref.set(block.to_dict())
@@ -146,7 +165,9 @@ class FirestoreIndex:
             raise
 
     def blocks_for_volume(self, job_id: str, volume_id: str) -> list[BlockRef]:
-        query = self._job(job_id).collection("blocks").where("volume_id", "==", volume_id)
+        query = (
+            self._job(job_id).collection("blocks").where("volume_id", "==", volume_id)
+        )
         return [from_dict(BlockRef, snap.to_dict() or {}) for snap in query.stream()]
 
     def delete_blocks(self, job_id: str, hashes: list[str]) -> None:
@@ -171,7 +192,9 @@ class FirestoreIndex:
 
     def put_blockset(self, job_id: str, blockset_id: str, hashes: list[str]) -> None:
         ref = self._job(job_id).collection("blocksets").document(blockset_id)
-        parts = [hashes[index : index + _PART] for index in range(0, len(hashes), _PART)] or [[]]
+        parts = [
+            hashes[index : index + _PART] for index in range(0, len(hashes), _PART)
+        ] or [[]]
         ref.set({"id": blockset_id, "count": len(hashes), "parts": len(parts)})
         self._batched_set(
             ref.collection("parts"),
@@ -191,7 +214,9 @@ class FirestoreIndex:
         return hashes
 
     def put_volume(self, job_id: str, volume: VolumeRef) -> None:
-        self._job(job_id).collection("volumes").document(volume.id).set(volume.to_dict())
+        self._job(job_id).collection("volumes").document(volume.id).set(
+            volume.to_dict()
+        )
 
     def get_volume(self, job_id: str, volume_id: str) -> VolumeRef:
         snap = self._job(job_id).collection("volumes").document(volume_id).get()
@@ -201,7 +226,11 @@ class FirestoreIndex:
 
     def get_volume_by_name(self, job_id: str, name: str) -> VolumeRef | None:
         matches = list(
-            self._job(job_id).collection("volumes").where("name", "==", name).limit(1).stream()
+            self._job(job_id)
+            .collection("volumes")
+            .where("name", "==", name)
+            .limit(1)
+            .stream()
         )
         if not matches:
             return None
@@ -233,13 +262,19 @@ class FirestoreIndex:
         missing: list[str] = []
         for start in range(0, len(hashes), 300):
             chunk = hashes[start : start + 300]
-            found = {snap.id for snap in self.db.get_all([col.document(digest) for digest in chunk]) if snap.exists}
+            found = {
+                snap.id
+                for snap in self.db.get_all([col.document(digest) for digest in chunk])
+                if snap.exists
+            }
             missing.extend(digest for digest in chunk if digest not in found)
         return missing
 
     def put_checkpoint(self, job_id: str, entries: list[FileEntry]) -> None:
         col = self._job(job_id).collection("checkpoint")
-        self._batched_set(col, [(_entry_id(entry), entry.to_dict()) for entry in entries])
+        self._batched_set(
+            col, [(_entry_id(entry), entry.to_dict()) for entry in entries]
+        )
 
     def list_checkpoint(self, job_id: str) -> list[FileEntry]:
         return [
@@ -261,9 +296,15 @@ class FirestoreIndex:
             snap = ref.get(transaction=transaction)
             now = time.time()
             current = snap.to_dict() if snap.exists else None
-            if current and current.get("holder") != holder and float(current.get("expires") or 0) > now:
+            if (
+                current
+                and current.get("holder") != holder
+                and float(current.get("expires") or 0) > now
+            ):
                 return False
-            transaction.set(ref, {"job_id": job_id, "holder": holder, "expires": now + ttl})
+            transaction.set(
+                ref, {"job_id": job_id, "holder": holder, "expires": now + ttl}
+            )
             return True
 
         return take(self.db.transaction())
@@ -298,7 +339,12 @@ class FirestoreIndex:
         self.db.collection("settings").document("global").set(settings.to_dict())
 
     def _entries(self, job_id: str, fileset_id: str):
-        return self._job(job_id).collection("filesets").document(fileset_id).collection("entries")
+        return (
+            self._job(job_id)
+            .collection("filesets")
+            .document(fileset_id)
+            .collection("entries")
+        )
 
     def _batched_set(self, collection, rows: list[tuple[str, dict]]) -> None:
         batch = self.db.batch()

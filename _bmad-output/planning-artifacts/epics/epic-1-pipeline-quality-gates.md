@@ -28,7 +28,7 @@ Every test that gates a change runs once, on the pull request (target under 15 m
 | Image | One multi-stage `Dockerfile` (Node build, then Python 3.12 slim, runs as uid 10001). Used by both the Cloud Run service and the Cloud Run job |
 | Infra | `terraform/` creates bucket, Firestore, Secret Manager, IAM, Cloud Run service (`ingress = INGRESS_TRAFFIC_ALL`), Cloud Run job (`run-due`) and Cloud Scheduler (every 15 minutes) |
 | CI/CD | None. No pipeline config exists. Deploy is a manual `terraform apply` with an `image` variable. Epic 8 adds the Cloud Build triggers, the PR test step and the Cloud Deploy pipeline that this epic extends |
-| Auth | `BGB_API_TOKEN` is optional. `allow_unauthenticated` can grant `allUsers` invoker |
+| Auth | `BGB_API_TOKEN` is optional. `allow_unauthenticated` can grant `allUsers` invoker. **Changing:** `epics.md` D7 makes IAP mandatory and removes the app token and the public option (Stories 5.1, 5.2) |
 | GCP project | Requested in the landing zone as a **Demo** tier project, `aviato-prod-demo-baby-got-back` (one project, no Shared VPC, no Cloud Deploy pipeline, group editor access until 2026-11-30) |
 
 ## 3. Assumptions and open decisions
@@ -140,7 +140,7 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 - [ ] Add `terraform fmt -check`, `terraform init -backend=false`, `terraform validate`, `tflint` and `checkov` steps. Reuse the landing zone `.tflint.hcl` and `.checkov.yaml` as a starting point.
 - [ ] Add `gitleaks` (or `trufflehog`) for secret scanning on the diff.
 - [ ] Add dependency vulnerability checks: `pip-audit` and `npm audit --omit=dev --audit-level=high`.
-- [ ] Add a checkov rule review for `ingress = INGRESS_TRAFFIC_ALL` and `allow_unauthenticated`, so the decision is explicit and suppressed with a reason rather than silent.
+- [ ] Add a checkov rule review for `ingress = INGRESS_TRAFFIC_ALL`, and a check that no `allUsers` invoker binding exists (IAP is mandatory, `epics.md` D7), so any exception is explicit and suppressed with a reason rather than silent.
 
 ---
 
@@ -189,7 +189,7 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 - [ ] Confirm `bgb` honours the emulator environment variables. If the GCS client is built with explicit credentials that bypass `STORAGE_EMULATOR_HOST`, add a small injection point.
 - [ ] Write parametrised fixtures in `tests/conftest.py` that yield each index and store implementation, and move the interface level assertions into shared test modules.
 - [ ] Add Firestore specific tests: a file whose block list exceeds one shard stays under the 1 MiB document limit; a backup larger than 500 writes completes (P0).
-- [ ] Add API integration tests using FastAPI `TestClient` over the emulator backed runtime, covering every route in `src/bgb/api/app.py` at least once (P1).
+- [ ] Add API integration tests using FastAPI `TestClient` over the emulator backed runtime, covering every route in `src/bgb/api/app.py` at least once (P1). Requests carry an IAP signed header made with a test key, accepted only because the test patches the verifier's Google key fetch in-process (`epics.md` Story 5.1, D11). No runtime setting can do this.
 - [ ] Run the existing demo journey (`/api/demo/seed`, run, list filesets, download content) against emulators, not only memory (P0).
 
 ---
@@ -243,27 +243,29 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 **Priority:** P0
 
 **Acceptance criteria**
-- With `BGB_API_TOKEN` set, every route except `/api/health` returns 401 without a valid bearer token. The test enumerates routes from the FastAPI app, so a new route is covered automatically and a new unauthenticated route fails the build unless it is on an explicit allow list.
+- Every route except `/api/health` returns 401 without a valid IAP signed header (`X-Goog-IAP-JWT-Assertion`), and with a header that fails signature, expiry or audience checks (`epics.md` Story 5.1, D7). The test enumerates routes from the FastAPI app, so a new route is covered automatically and a new unauthenticated route fails the build unless it is on an explicit allow list.
 - The file content endpoint rejects path traversal and paths outside the fileset.
 - The TypeScript types used by the web UI are generated from, or checked against, the FastAPI OpenAPI schema. A breaking API change fails the PR.
 
 **Tasks**
 - [ ] Add a parametrised auth test over `app.routes` (P0).
 - [ ] Add negative tests for `/api/jobs/{job_id}/filesets/{fileset_id}/content`: `..`, absolute paths, encoded separators, another job's fileset (P0).
-- [ ] Add tests that secrets (service account key, OAuth refresh token, API token) never appear in any API response or log line (P0).
+- [ ] Add tests that secrets (service account key, OAuth refresh token) and the IAP signed header never appear in any API response or log line (P0).
 - [ ] Export the OpenAPI schema in CI and generate types with `openapi-typescript`. Fail if `web/src/lib/types.ts` differs from the generated output, or replace the hand written types with the generated ones (P1).
-- [ ] Add a production configuration check: the Cloud Deploy verification in Story 1.10 fails the rollout when the service is publicly invokable and `BGB_API_TOKEN` is unset (P0).
+- [ ] Add a production configuration check: the Cloud Deploy verification in Story 1.10 fails the rollout when the service is publicly invokable or IAP is not enabled on it (P0).
+- [ ] Add an image check: the shipped image contains no development entry point and no test key material (`epics.md` D11) (P0).
 
 ---
 
 ### Story 1.8: UI end to end tests with Playwright (Stage 5)
 
-**As** a user, **I want** the core journeys in the web UI tested in a real browser against the real image, **so that** the static export and the API work together.
+**As** a user, **I want** the core journeys in the web UI tested in a real browser, **so that** the static export behaves correctly for every API response it can get.
 
 **Priority:** P1
 
 **Acceptance criteria**
-- Playwright runs against the container built in Stage 4, started with the demo configuration (local volumes and JSON index, no Google credentials).
+- Playwright runs against the static export built in Stage 4, with the API mocked at the network layer (`interceptNetworkCall`), including a signed-in identity and an expired session (401). IAP is never weakened for tests (`epics.md` D11): there is no auth bypass in the image. The real image and API together are covered in-process by Story 1.4 and, through real IAP, by Story 1.10's post-deploy checks.
+- Mocked responses are generated from or checked against the OpenAPI schema (Story 1.7), so mocks cannot drift from the real API.
 - Tests are written with `@seontechnologies/playwright-utils` fixtures (`apiRequest`, `interceptNetworkCall`, `recurse`, `log`), per the TEA configuration. Any vanilla Playwright usage carries a `playwright-utils deviation` comment with a reason.
 - P0 and P1 journeys run on PRs in under 4 minutes. Traces, screenshots and video are kept on failure only.
 
@@ -272,7 +274,7 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 - [ ] Journeys:
   - Load the Northwind sample, run now, see the run complete (P0).
   - Browse a fileset and download a file; downloaded bytes equal the fixture (P0).
-  - Settings: save the API token, then confirm the UI sends it and that a wrong token shows an error, not a blank page (P0).
+  - Sign-in: the header shows the signed-in user, and an expired session shows the sign-in-again page, not a blank page (P0, `epics.md` Story 5.3).
   - Create a job with all sources selected in demo mode and see a fileset for each (P1, owned by Epic 9 Story 9.6).
   - Retention and schedule fields validate input (P2).
 - [ ] Use API calls for setup (seed, run) and the browser only for the behaviour under test.
@@ -311,14 +313,14 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 
 **Acceptance criteria**
 - The `prod` target's rollout runs verification as part of Cloud Deploy, not as a separate Cloud Build step. The new revision is checked before it takes all traffic, using a Cloud Deploy canary strategy for Cloud Run or an equivalent verify then promote phase. The chosen mechanism is recorded in the story notes.
-- Smoke tests run against the new revision: health, auth enforced, and the production configuration check from Story 1.7. They are new post deploy checks, not a repeat of stages 1 to 5.
+- Smoke tests run against the new revision through real IAP, as a dedicated smoke-test service account with IAP access only (`epics.md` Story 5.2): health, a signed-in request succeeds, a request with no sign-in is refused by IAP at the edge, and the production configuration check from Story 1.7. The app's own header check is covered by unit tests, because IAP always adds the header for requests that reach the app. They are new post deploy checks, not a repeat of stages 1 to 5.
 - A **canary job execution** runs `python -m bgb run-due` from a separate Cloud Run job, `bgb-backup-ci`, using the release image against the CI bucket and CI Firestore database, and must complete.
 - If any check fails, the rollout fails, traffic and the production `bgb-backup` job stay on (or return to) the previous release, and the evidence is attached to the rollout.
 - A failed rollout or automatic rollback emails the alerts group (Story 1.12).
 
 **Tasks**
 - [ ] Add to `terraform/`: CI bucket, named Firestore database `bgb-ci`, and the `bgb-backup-ci` job, which Cloud Deploy updates with the release image. **Never write test data into the production bucket or database.**
-- [ ] Write `ci/smoke/` tests (pytest with `httpx`, P0) that take the base URL and an ID token as input, packaged as the Cloud Deploy verification container.
+- [ ] Write `ci/smoke/` tests (pytest with `httpx`, P0) that take the base URL and an ID token for the IAP audience as input, packaged as the Cloud Deploy verification container, running as the smoke-test service account.
 - [ ] Add the canary or phased strategy and `verify: true` to the `prod` target in the delivery pipeline (Epic 8 Story 8.4).
 - [ ] Add automatic rollback on failed verification (Cloud Deploy automation or a rollback step), and test it with a deliberately failing release.
 - [ ] Keep it working when more targets are added: verification is defined per target in `deploy_targets`.
@@ -335,7 +337,7 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 
 **Acceptance criteria**
 - The nightly build runs the full P0 to P3 suite and reports pass rate and flaky tests.
-- **Production run failures alert the team:** because there are no live source tests, a failed or partially failed `bgb-backup` run (including skipped items above a threshold, 429 or 403 errors from Google) sends an email to the alerts group within 30 minutes.
+- **Production run failures alert the team:** owned by `epics.md` Epic 6 (D5), which alerts on failed, stuck and warning runs through the Story 1.12 channel. This story does not add its own failed-run alert, so each problem sends one email.
 - **Restore drill:** weekly, restore a full fileset from the CI bucket into a scratch location and run `bgb verify --full`.
 - **Performance:** a backup of a generated data set (for example 5 GB with 30% duplicate blocks) completes within the 2 GiB job memory limit and records duration, throughput and peak memory. A regression of more than 20% against the trailing 7 day median opens a ticket.
 - **API load:** a short k6 run against the live service checks p95 latency of list and summary endpoints with realistic fileset sizes.
@@ -344,7 +346,7 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 - [ ] Add `ci/cloudbuild-nightly.yaml` and its Cloud Scheduler trigger.
 - [ ] Write a data generator for the performance set and store results as JSON in the artifacts bucket.
 - [ ] Add k6 scripts under `ci/perf/`.
-- [ ] Add a log based metric and a Cloud Monitoring alert policy on failed `bgb-backup` job executions and run errors, sending to the email notification channel from Story 1.12.
+- [ ] ~~Add a log based metric and alert policy on failed `bgb-backup` executions~~ Moved to `epics.md` Story 6.2 (D5). Keep only the nightly regression and restore drill alerts here.
 - [ ] Email the nightly summary to the alerts group (Story 1.12).
 
 **Deferred until a test Workspace exists (D2)**
@@ -372,7 +374,7 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 - [ ] Add a gate evaluation script that reads JUnit XML and the quarantine list and returns pass or fail.
 - [ ] Add the burn in step for changed tests (pytest `--count` via `pytest-repeat`, Playwright `--repeat-each`).
 - [ ] Add `ci/quarantine.yaml` with owner and expiry per entry. The gate fails when an entry has expired.
-- [ ] Set up email alerts (D4) to the project approvers group, `aviato-prod-demo-baby-got-back-approvers@aviato.consulting`. Create a Cloud Monitoring email notification channel for that group. Cloud Build has no built in email, so deploy the Cloud Build SMTP notifier (Cloud Run service subscribed to the `cloud-builds` Pub/Sub topic) filtered to failed main and nightly builds, rollbacks, and the gate step reporting an expired quarantine entry. Confirm the group accepts mail from outside the domain or from the SMTP sender used.
+- [ ] Set up email alerts (D4) to `bgb-admins@aviato.consulting`. Create a Cloud Monitoring email notification channel for that group; `epics.md` Epic 6 uses the same channel. Cloud Build has no built in email, so deploy the Cloud Build SMTP notifier (Cloud Run service subscribed to the `cloud-builds` Pub/Sub topic) filtered to failed main and nightly builds, rollbacks, and the gate step reporting an expired quarantine entry. Confirm the group accepts mail from outside the domain or from the SMTP sender used.
 - [ ] Add a Looker Studio or simple dashboard over the artifacts bucket for pass rate and flaky trends (optional, P3).
 
 ---
@@ -401,7 +403,7 @@ Stories are ordered by dependency. All of them build on Epic 8 Stories 8.1 to 8.
 | D1 | May the pipeline own the Cloud Run image (with Terraform ignoring it), to allow no traffic canary deploys and rollback? | **Decided 2026-10-31: yes.** Terraform owns infrastructure, the pipeline owns revisions. Extended by Epic 8 DEP-D1: Cloud Deploy also owns runtime configuration. |
 | D2 | Is there a test Google Workspace tenant or OU for nightly live tests? | **Decided 2026-10-31: none for now.** Live tests deferred; production run failures alert instead. Revisit before the first customer tenant. |
 | D3 | Cloud Build or GitHub Actions? | **Decided 2026-10-31: Cloud Build.** |
-| D4 | Where should nightly summaries and gate failures be posted? | **Decided 2026-10-31: email to a group**, the project approvers group `aviato-prod-demo-baby-got-back-approvers@aviato.consulting` (assumed; change if another group is preferred). |
+| D4 | Where should nightly summaries and gate failures be posted? | **Decided 2026-10-31 (Ben): email to `bgb-admins@aviato.consulting`**, the same group that has console access (`epics.md` D8). |
 | D5 | Must the Firestore index tests (R-001) run against the emulator before the epic proceeds? | **Decided 2026-10-31 (Ben): no.** R-001 is accepted as derisked (waiver W-001 in `_bmad-output/test-artifacts/test-design-epic-1.md`). The tests are written and skipped, and the emulator harness in Story 1.4 is deferred. The Story 1.10 canary job against real Firestore stays mandatory. |
 
 All decisions are now recorded. Remaining risk to watch: the Demo tier expiry on 2026-11-30 (section 7).

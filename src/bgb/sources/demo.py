@@ -59,11 +59,17 @@ class DemoGmail:
 
     def get_metadata(self, user: str, message_id: str) -> dict:
         row = self.messages[user][message_id]
-        return {key: row[key] for key in ("id", "labelIds", "internalDate", "snippet", "subject")}
+        return {
+            key: row[key]
+            for key in ("id", "labelIds", "internalDate", "snippet", "subject")
+        }
 
     def get_message(self, user: str, message_id: str) -> dict:
         self.raw_reads.append((user, message_id))
-        return dict(self.get_metadata(user, message_id), raw=self.messages[user][message_id]["raw"])
+        return dict(
+            self.get_metadata(user, message_id),
+            raw=self.messages[user][message_id]["raw"],
+        )
 
     def list_history(self, user: str, start: str):
         if start != "10":
@@ -136,7 +142,12 @@ class DemoDrive:
             },
         }
         self.by_owner = {
-            "ada@northwind.example": ["folder-ada", "ada-handbook", "ada-budget", "ada-form"],
+            "ada@northwind.example": [
+                "folder-ada",
+                "ada-handbook",
+                "ada-budget",
+                "ada-form",
+            ],
             "grace@northwind.example": ["grace-notes"],
         }
         self.shared = {
@@ -203,11 +214,25 @@ class DemoContacts:
             ],
         }
 
-    def list_connections(self, user: str, page_token: str | None = None, sync_token: str | None = None):
+    def list_connections(
+        self, user: str, page_token: str | None = None, sync_token: str | None = None
+    ):
         if sync_token:
             if sync_token != "s1":
-                return {"expired": True, "people": [], "deleted": [], "next_page": None, "sync_token": None}
-            return {"expired": False, "people": [], "deleted": [], "next_page": None, "sync_token": "s1"}
+                return {
+                    "expired": True,
+                    "people": [],
+                    "deleted": [],
+                    "next_page": None,
+                    "sync_token": None,
+                }
+            return {
+                "expired": False,
+                "people": [],
+                "deleted": [],
+                "next_page": None,
+                "sync_token": "s1",
+            }
         return {
             "expired": False,
             "people": list(self.people.get(user, [])),
@@ -223,7 +248,9 @@ class DemoDirectory:
 
 
 def demo_sources(job: Job):
-    users = [user.strip().lower() for user in job.users] or DemoDirectory().list_user_emails()
+    users = [
+        user.strip().lower() for user in job.users
+    ] or DemoDirectory().list_user_emails()
     gmail = DemoGmail()
     drive = DemoDrive()
     contacts = DemoContacts()
@@ -233,7 +260,12 @@ def demo_sources(job: Job):
     if "drive" in job.sources:
         actor = users[0] if users else ""
         sources.append(
-            DriveSource(drive, users, include_shared=job.include_shared_drives, shared_actor=actor)
+            DriveSource(
+                drive,
+                users,
+                include_shared=job.include_shared_drives,
+                shared_actor=actor,
+            )
         )
     if "contacts" in job.sources:
         sources.append(ContactsSource(contacts, users))

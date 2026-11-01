@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 import uuid
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 
 from bgb.engine import Engine
@@ -30,7 +30,9 @@ class Runtime:
             index,
             volumes,
             sources_for=lambda job, settings: build_sources(job, settings, secrets),
-            min_object_age=timedelta(days=int(os.environ.get("BGB_OBJECT_RETENTION_DAYS") or 0)),
+            min_object_age=timedelta(
+                days=int(os.environ.get("BGB_OBJECT_RETENTION_DAYS") or 0)
+            ),
         )
 
     def flush(self) -> None:
@@ -39,7 +41,9 @@ class Runtime:
     def start_backup(self, job_id: str, *, wait: bool = False) -> Run:
         self.index.get_job(job_id)
         if self.index.lease_holder(job_id):
-            raise Conflict("a backup or maintenance task for this job is already running")
+            raise Conflict(
+                "a backup or maintenance task for this job is already running"
+            )
         run = Run(
             id=uuid.uuid4().hex,
             job_id=job_id,
@@ -52,7 +56,9 @@ class Runtime:
         cloud_job = os.environ.get("BGB_CLOUD_RUN_JOB", "").strip()
         if cloud_job and not wait:
             try:
-                _trigger_cloud_run_job(cloud_job, ["run", "--job-id", job_id, "--run-id", run.id])
+                _trigger_cloud_run_job(
+                    cloud_job, ["run", "--job-id", job_id, "--run-id", run.id]
+                )
             except Exception as exc:
                 run.status = "failed"
                 run.phase = "failed"
@@ -75,9 +81,9 @@ class Runtime:
         return run
 
     def run_due(self) -> list[Run]:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         started: list[Run] = []
         for job in self.index.list_jobs():
             if not job.enabled or not job.schedule:
@@ -145,7 +151,9 @@ def build_runtime() -> Runtime:
     index.save_settings(settings)
     if volume_kind == "gcs":
         if not settings.gcs_bucket:
-            raise ConfigError("Set BGB_GCS_BUCKET or the bucket in settings before using Cloud Storage")
+            raise ConfigError(
+                "Set BGB_GCS_BUCKET or the bucket in settings before using Cloud Storage"
+            )
         volumes = GCSVolumeStore(settings.gcs_bucket)
     else:
         volumes = LocalVolumeStore(data / "volumes")
@@ -164,15 +172,13 @@ def _trigger_cloud_run_job(name: str, args: list[str]) -> None:
     import google.auth
     from google.auth.transport.requests import AuthorizedSession
 
-    credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    credentials, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
     session = AuthorizedSession(credentials)
     response = session.post(
         f"https://run.googleapis.com/v2/{name}:run",
-        json={
-            "overrides": {
-                "containerOverrides": [{"args": ["-m", "bgb", *args]}]
-            }
-        },
+        json={"overrides": {"containerOverrides": [{"args": ["-m", "bgb", *args]}]}},
         timeout=60,
     )
     if response.status_code >= 300:

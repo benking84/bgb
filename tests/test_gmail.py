@@ -55,7 +55,9 @@ def test_full_scan_and_history_incremental():
     assert obj.path == "gmail/ada@example.com/messages/m1.eml"
     assert obj.opener().read().startswith(b"Subject: one")
 
-    job = Job(id="j", name="n", source_state={"gmail": first.state}, created_at=now_iso())
+    job = Job(
+        id="j", name="n", source_state={"gmail": first.state}, created_at=now_iso()
+    )
     client.profile_history = "5"
     client.history = {
         "historyId": "5",
@@ -65,7 +67,13 @@ def test_full_scan_and_history_incremental():
             {"added": [], "deleted": [], "label_changed": ["m2"]},
         ],
     }
-    _message(user, client, "m2", b"Subject: two\r\n\r\nthere\r\n", labels=["INBOX", "STARRED"])
+    _message(
+        user,
+        client,
+        "m2",
+        b"Subject: two\r\n\r\nthere\r\n",
+        labels=["INBOX", "STARRED"],
+    )
     second = source.scan(job)
     scope = second.scopes[0]
     assert scope.mode == "incremental"
@@ -78,7 +86,11 @@ def test_full_scan_and_history_incremental():
     assert scope.objects[0].metadata["subject"] == "two"
 
     client.expired = True
-    third = source.scan(Job(id="j", name="n", source_state={"gmail": second.state}, created_at=now_iso()))
+    third = source.scan(
+        Job(
+            id="j", name="n", source_state={"gmail": second.state}, created_at=now_iso()
+        )
+    )
     assert third.scopes[0].mode == "full"
     assert third.warnings
 
@@ -90,7 +102,9 @@ def test_identical_messages_dedup_and_label_change_does_not_reread(tmp_path):
     _message(user, client, "m1", body)
     _message(user, client, "m2", body)
     source = GmailSource(client, [user])
-    runtime, holder = make_engine(tmp_path, block_size=32, volume_size=4096, source=source)
+    runtime, holder = make_engine(
+        tmp_path, block_size=32, volume_size=4096, source=source
+    )
     holder["source"] = source
     runtime.index.upsert_job(job(block_size=32, sources=["gmail"]))
     first = runtime.engine.run_backup("job1")
@@ -112,7 +126,9 @@ def test_identical_messages_dedup_and_label_change_does_not_reread(tmp_path):
     assert second.stats["files_read"] == 0
     assert len(client.raw_calls) == 2
     fileset = runtime.index.list_filesets("job1")[0]
-    entry = runtime.index.get_entry("job1", fileset.id, "gmail/ada@example.com/messages/m1.eml")
+    entry = runtime.index.get_entry(
+        "job1", fileset.id, "gmail/ada@example.com/messages/m1.eml"
+    )
     assert "STARRED" in entry.metadata["labels"]
 
 

@@ -17,3 +17,8 @@ web/out/
 *.tfstate
 *.tfstate.*
 .DS_Store
+.coverage
+.bmad-loop/runs/
+.bmad-loop/cache/
+.bmad-loop/policy.toml
+_bmad/render/

@@ -49,7 +49,11 @@ class BytesSource:
                     opener=self._opener(data),
                 )
             )
-        return Scan(scopes=[ScopeScan("mem:main", "full", objects)], state={"n": len(objects)}, warnings=[])
+        return Scan(
+            scopes=[ScopeScan("mem:main", "full", objects)],
+            state={"n": len(objects)},
+            warnings=[],
+        )
 
     def _opener(self, data: bytes):
         def open_file(body: bytes = data):
@@ -65,8 +69,10 @@ def _revision(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def make_engine(tmp: Path, *, block_size: int = 32, volume_size: int = 4096, source=None):
-    index = MemoryIndex()
+def make_engine(
+    tmp: Path, *, block_size: int = 32, volume_size: int = 4096, source=None, index=None
+):
+    index = index if index is not None else MemoryIndex()
     settings = index.get_settings()
     settings.block_size = block_size
     settings.volume_size = volume_size
@@ -91,16 +97,16 @@ def make_engine(tmp: Path, *, block_size: int = 32, volume_size: int = 4096, sou
 
 
 def job(**overrides) -> Job:
-    payload = dict(
-        id="job1",
-        name="Test",
-        users=["ada@example.com"],
-        sources=["gmail"],
-        retention="versions:5",
-        block_size=32,
-        volume_size=4096,
-        created_at=now_iso(),
-        demo=False,
-    )
+    payload = {
+        "id": "job1",
+        "name": "Test",
+        "users": ["ada@example.com"],
+        "sources": ["gmail"],
+        "retention": "versions:5",
+        "block_size": 32,
+        "volume_size": 4096,
+        "created_at": now_iso(),
+        "demo": False,
+    }
     payload.update(overrides)
     return Job(**payload)

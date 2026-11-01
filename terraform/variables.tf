@@ -5,13 +5,13 @@ variable "project_id" {
 
 variable "region" {
   type    = string
-  default = "us-central1"
+  default = "australia-southeast1"
 }
 
 variable "firestore_location" {
   type        = string
   description = "Firestore location. The (default) database can be created only once per project."
-  default     = "nam5"
+  default     = "australia-southeast1"
 }
 
 variable "bucket_name" {
@@ -20,7 +20,8 @@ variable "bucket_name" {
 
 variable "image" {
   type        = string
-  description = "Cloud Run image, for example REGION-docker.pkg.dev/PROJECT/bgb/bgb:latest"
+  description = "Bootstrap Cloud Run image. Cloud Deploy owns the running image after the first release (DEP-D1), so this is used only when the service and job are first created."
+  default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
 variable "allow_unauthenticated" {
@@ -68,4 +69,39 @@ variable "job_max_retries" {
   type        = number
   description = "Retries for a failed backup task. Each retry resumes from the last checkpoint."
   default     = 3
+}
+
+variable "deploy_targets" {
+  type = map(object({
+    project_id       = optional(string)
+    region           = optional(string)
+    require_approval = optional(bool, false)
+    parameters       = optional(map(string), {})
+  }))
+  description = "Cloud Deploy targets by id. project_id and region default to var.project_id and var.region. parameters override the base deploy parameters for that target."
+  default     = { prod = {} }
+}
+
+variable "deploy_stage_order" {
+  type        = list(string)
+  description = "Target ids in promotion order. Each must be a key of deploy_targets."
+  default     = ["prod"]
+}
+
+variable "iap_audience" {
+  type        = string
+  description = "IAP audience the service validates (BGB_IAP_AUDIENCE). Empty until IAP is set up (Story 5.1)."
+  default     = ""
+}
+
+variable "github_connection_name" {
+  type        = string
+  description = "Name of the 2nd gen Cloud Build GitHub connection. Authorised once in the console, then imported (see CI-CD-SETUP.md)."
+  default     = "bgb-github"
+}
+
+variable "github_repository_uri" {
+  type        = string
+  description = "GitHub repository that triggers builds."
+  default     = "https://github.com/AviatoConsulting/bgb.git"
 }

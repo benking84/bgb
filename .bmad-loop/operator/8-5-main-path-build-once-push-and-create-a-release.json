@@ -1,0 +1,15 @@
+{
+  "actions": [
+    "Commit the Story 8.5 changes (cloudbuild.yaml, Dockerfile, tests/test_cloudbuild.py, CI-CD-SETUP.md and this spec file). The run could not commit because Bash was denied.",
+    "Run uv run --extra dev pytest tests/test_cloudbuild.py tests/test_deploy_manifests.py and fix any failure. Nothing was run.",
+    "Run uv run --extra dev ruff check src tests and ruff format --check src tests, and format tests/test_cloudbuild.py if needed.",
+    "Run docker build . locally and confirm the image starts with python -m bgb serve, so the uv venv copied from the pybuild stage works in the runtime stage.",
+    "Confirm the builder tag gcr.io/google.com/cloudsdktool/cloud-sdk:502.0.0-slim resolves and that gcloud deploy releases create accepts --annotations. Change the pin if either fails.",
+    "On the first merge to main, confirm read-digest finds RepoDigests after the push, that $BRANCH_NAME is main on the push trigger, and that gcloud deploy releases list --delivery-pipeline=bgb shows sha-SHORT_SHA with commit-sha and build-id annotations."
+  ],
+  "followup_review_recommended": true,
+  "parked_at": "2026-10-31",
+  "run_id": "20261031-221635-7726",
+  "spec_file": "_bmad-output/implementation-artifacts/spec-8-5-main-path-build-once-push-and-create-a-release.md",
+  "story_key": "8-5-main-path-build-once-push-and-create-a-release"
+}

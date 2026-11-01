@@ -1,6 +1,6 @@
 import io
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -31,7 +31,10 @@ class CountingSource(BytesSource):
 
 
 def _files(count, size=200):
-    return {f"f{index:03d}": bytes([index % 251]) * size + index.to_bytes(4, "big") for index in range(count)}
+    return {
+        f"f{index:03d}": bytes([index % 251]) * size + index.to_bytes(4, "big")
+        for index in range(count)
+    }
 
 
 def test_killed_run_resumes_without_rereading(tmp_path, monkeypatch):
@@ -96,7 +99,9 @@ def test_fileset_is_not_saved_when_reused_blocks_vanish(tmp_path):
     def has_block_then_lose_it(job_id, digest):
         hit = original(job_id, digest)
         if hit:
-            runtime.index.delete_blocks(job_id, [digest])  # what an unguarded compaction would do
+            runtime.index.delete_blocks(
+                job_id, [digest]
+            )  # what an unguarded compaction would do
         return hit
 
     runtime.index.has_block = has_block_then_lose_it
@@ -110,17 +115,21 @@ def test_retention_defers_deletes_until_objects_are_old_enough(tmp_path):
     source = CountingSource({"a": b"a" * 300})
     runtime, _ = make_engine(tmp_path, source=source)
     runtime.engine.min_object_age = timedelta(days=30)
-    runtime.index.upsert_job(job(sources=["mem"], block_size=64, volume_size=1024, retention="versions:1"))
+    runtime.index.upsert_job(
+        job(sources=["mem"], block_size=64, volume_size=1024, retention="versions:1")
+    )
     runtime.engine.run_backup("job1")
     source.files = {"b": b"b" * 300}
     run = runtime.engine.run_backup("job1")
     assert run.stats["filesets_removed"] == 1
     assert run.stats["volumes_rewritten"] == 0 and run.stats["volumes_deleted"] == 0
-    expired = [row for row in runtime.index.list_volumes("job1") if row.state == "expired"]
+    expired = [
+        row for row in runtime.index.list_volumes("job1") if row.state == "expired"
+    ]
     assert [row.kind for row in expired] == ["dlist"]
     assert expired[0].name in runtime.volumes.objects
 
-    later = datetime.now(timezone.utc) + timedelta(days=31)
+    later = datetime.now(UTC) + timedelta(days=31)
     assert runtime.engine.sweep_expired("job1", now=later) == 1
     assert expired[0].name not in runtime.volumes.objects
     assert runtime.engine.verify("job1", full=True)["ok"]
@@ -134,8 +143,18 @@ def _http_error(status, body):
 
 
 def test_rate_limit_403_is_retried_but_permission_403_is_not():
-    limited = {"error": {"errors": [{"reason": "userRateLimitExceeded"}], "status": "PERMISSION_DENIED"}}
-    denied = {"error": {"errors": [{"reason": "insufficientPermissions"}], "status": "PERMISSION_DENIED"}}
+    limited = {
+        "error": {
+            "errors": [{"reason": "userRateLimitExceeded"}],
+            "status": "PERMISSION_DENIED",
+        }
+    }
+    denied = {
+        "error": {
+            "errors": [{"reason": "insufficientPermissions"}],
+            "status": "PERMISSION_DENIED",
+        }
+    }
     assert _retryable(_http_error(403, limited))
     assert not _retryable(_http_error(403, denied))
     assert _retryable(_http_error(429, {}))

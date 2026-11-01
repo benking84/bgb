@@ -1,5 +1,11 @@
 terraform {
   required_version = ">= 1.5"
+  # State lives in a versioned, private bucket in the same project, created once by hand
+  # (see README "Deploy"). Only the deployers should be able to read it.
+  backend "gcs" {
+    bucket = "aviato-prod-demo-baby-got-back-tfstate"
+    prefix = "bgb"
+  }
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -32,7 +38,26 @@ locals {
     "storage.googleapis.com",
     "iam.googleapis.com",
     "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "clouddeploy.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "containerscanning.googleapis.com",
+    "cloudquotas.googleapis.com",
   ], var.kms_key_name == "" ? [] : ["cloudkms.googleapis.com"])
+
+  # Base Cloud Deploy parameters. Keys are the {{.KEY}} placeholders in deploy/*.yaml. A target's
+  # own parameters override these, so a second environment can point at its own bucket and so on.
+  base_deploy_parameters = {
+    GOOGLE_CLOUD_PROJECT      = var.project_id
+    BGB_GCS_BUCKET            = google_storage_bucket.backups.name
+    BGB_CLOUD_RUN_JOB         = local.backup_job_name
+    UI_SERVICE_ACCOUNT        = google_service_account.ui.email
+    RUNTIME_SERVICE_ACCOUNT   = google_service_account.runtime.email
+    BGB_OBJECT_RETENTION_DAYS = tostring(var.object_retention_days)
+    BGB_IAP_AUDIENCE          = var.iap_audience
+    JOB_TIMEOUT_SECONDS       = tostring(var.job_timeout_hours * 3600)
+    JOB_MAX_RETRIES           = tostring(var.job_max_retries)
+  }
 }
 
 resource "google_project_service" "required" {
@@ -191,7 +216,9 @@ resource "google_secret_manager_secret_iam_member" "workspace_sa" {
 resource "google_cloud_run_v2_service" "ui" {
   name     = "bgb"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  # Aviato org policy run.allowedIngress allows only internal-and-cloud-load-balancing.
+  # Users reach the console through an external HTTPS load balancer with IAP (Story 5.2).
+  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
     service_account                  = google_service_account.ui.email
     timeout                          = "3600s"
@@ -233,6 +260,13 @@ resource "google_cloud_run_v2_service" "ui" {
       }
     }
   }
+  # DEP-D1: Cloud Deploy owns the running image and Cloud Run runtime config. Terraform creates
+  # this resource once with the bootstrap image, then ignores the template so a later apply
+  # does not revert what a release deployed.
+  lifecycle {
+    ignore_changes = [template, client, client_version]
+  }
+
   depends_on = [google_project_service.required, google_cloud_run_v2_job.backup]
 }
 
@@ -290,6 +324,11 @@ resource "google_cloud_run_v2_job" "backup" {
       }
     }
   }
+  # DEP-D1: see the lifecycle comment on google_cloud_run_v2_service.ui.
+  lifecycle {
+    ignore_changes = [template, client, client_version]
+  }
+
   depends_on = [google_project_service.required]
 }
 
@@ -322,4 +361,237 @@ resource "google_cloud_scheduler_job" "run_due" {
     }
   }
   depends_on = [google_project_service.required, google_cloud_run_v2_job_iam_member.scheduler_invokes]
+}
+
+# Deployment pipeline (Epic 8). Roles and reasons are documented in CI-CD-SETUP.md.
+resource "google_artifact_registry_repository" "bgb" {
+  repository_id = "bgb"
+  location      = var.region
+  format        = "DOCKER"
+  description   = "bgb container images"
+
+  cleanup_policy_dry_run = false
+
+  cleanup_policies {
+    id     = "keep-recent-tagged"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 20
+    }
+  }
+
+  # KEEP wins over DELETE, so the newest 20 versions survive. Older tagged versions go after
+  # 30 days, which leaves recent rollback targets in place.
+  cleanup_policies {
+    id     = "delete-old-tagged"
+    action = "DELETE"
+    condition {
+      tag_state  = "TAGGED"
+      older_than = "2592000s"
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_service_account" "cloudbuild" {
+  account_id   = "bgb-cloudbuild"
+  display_name = "bgb Cloud Build"
+}
+
+resource "google_service_account" "deployer" {
+  account_id   = "bgb-deployer"
+  display_name = "bgb Cloud Deploy execution"
+}
+
+# bgb-cloudbuild: runs builds, pushes images and creates releases.
+resource "google_project_iam_member" "cloudbuild_logs" {
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+resource "google_project_iam_member" "cloudbuild_releaser" {
+  project = var.project_id
+  role    = "roles/clouddeploy.releaser"
+  member  = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "cloudbuild_writer" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.bgb.location
+  repository = google_artifact_registry_repository.bgb.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# Creating a release makes Cloud Deploy run as bgb-deployer.
+resource "google_service_account_iam_member" "cloudbuild_acts_as_deployer" {
+  service_account_id = google_service_account.deployer.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.cloudbuild.email}"
+}
+
+# bgb-deployer: executes Cloud Deploy rollouts onto Cloud Run.
+resource "google_project_iam_member" "deployer_job_runner" {
+  project = var.project_id
+  role    = "roles/clouddeploy.jobRunner"
+  member  = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_cloud_run_v2_service_iam_member" "deployer_service" {
+  name     = google_cloud_run_v2_service.ui.name
+  location = var.region
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_cloud_run_v2_job_iam_member" "deployer_job" {
+  name     = google_cloud_run_v2_job.backup.name
+  location = var.region
+  role     = "roles/run.developer"
+  member   = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+resource "google_artifact_registry_repository_iam_member" "deployer_reader" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.bgb.location
+  repository = google_artifact_registry_repository.bgb.name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+# Deploying a revision that runs as an app account needs actAs on that account, and on no other.
+resource "google_service_account_iam_member" "deployer_acts_as_app" {
+  for_each           = { run = google_service_account.runtime.name, ui = google_service_account.ui.name }
+  service_account_id = each.value
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deployer.email}"
+}
+
+# Lets the job read its own quota usage (Story 10.2 pacing).
+resource "google_project_iam_member" "runtime_quota_viewer" {
+  project = var.project_id
+  role    = "roles/cloudquotas.viewer"
+  member  = "serviceAccount:${google_service_account.runtime.email}"
+}
+
+# Cloud Deploy (Story 8.4). One target per deploy_targets entry, promoted in deploy_stage_order.
+# Targets render and deploy as bgb-deployer.
+resource "google_clouddeploy_target" "targets" {
+  for_each = var.deploy_targets
+
+  name             = each.key
+  description      = "bgb ${each.key}"
+  project          = coalesce(each.value.project_id, var.project_id)
+  location         = coalesce(each.value.region, var.region)
+  require_approval = each.value.require_approval
+
+  run {
+    location = "projects/${coalesce(each.value.project_id, var.project_id)}/locations/${coalesce(each.value.region, var.region)}"
+  }
+
+  execution_configs {
+    usages          = ["RENDER", "DEPLOY"]
+    service_account = google_service_account.deployer.email
+  }
+
+  deploy_parameters = merge(local.base_deploy_parameters, each.value.parameters)
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_clouddeploy_delivery_pipeline" "bgb" {
+  name        = "bgb"
+  description = "bgb release pipeline"
+  project     = var.project_id
+  location    = var.region
+
+  serial_pipeline {
+    dynamic "stages" {
+      for_each = var.deploy_stage_order
+      content {
+        target_id = google_clouddeploy_target.targets[stages.value].target_id
+      }
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = alltrue([for t in var.deploy_stage_order : contains(keys(var.deploy_targets), t)])
+      error_message = "Every deploy_stage_order entry must be a key of deploy_targets."
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+# GitHub connection and triggers (Story 8.2). The OAuth handshake is manual: create the connection
+# in the console, then import it. github_config is ignored so the OAuth credentials never show as
+# a diff. See CI-CD-SETUP.md.
+resource "google_cloudbuildv2_connection" "github" {
+  project  = var.project_id
+  location = var.region
+  name     = var.github_connection_name
+
+  github_config {}
+
+  lifecycle {
+    ignore_changes = [github_config]
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloudbuildv2_repository" "bgb" {
+  project           = var.project_id
+  location          = var.region
+  name              = "bgb"
+  parent_connection = google_cloudbuildv2_connection.github.name
+  remote_uri        = var.github_repository_uri
+}
+
+# Pull requests to main. Owners and collaborators run unprompted. Anyone else waits for a
+# maintainer to comment /gcbrun, so outside code never runs with project credentials unreviewed.
+resource "google_cloudbuild_trigger" "pr" {
+  project         = var.project_id
+  location        = var.region
+  name            = "bgb-pr"
+  description     = "Tests and checks for pull requests to main"
+  filename        = "cloudbuild.yaml"
+  service_account = google_service_account.cloudbuild.id
+
+  repository_event_config {
+    repository = google_cloudbuildv2_repository.bgb.id
+    pull_request {
+      branch          = "^main$"
+      comment_control = "COMMENTS_ENABLED_FOR_EXTERNAL_CONTRIBUTORS_ONLY"
+    }
+  }
+
+  substitutions = {
+    _MODE = "pr"
+  }
+}
+
+# Pushes to main: build, push and release. Tests are not rerun, so branch protection must
+# require the bgb-pr check (CI-CD-SETUP.md).
+resource "google_cloudbuild_trigger" "main" {
+  project         = var.project_id
+  location        = var.region
+  name            = "bgb-main"
+  description     = "Build, push and release on merge to main"
+  filename        = "cloudbuild.yaml"
+  service_account = google_service_account.cloudbuild.id
+
+  repository_event_config {
+    repository = google_cloudbuildv2_repository.bgb.id
+    push {
+      branch = "^main$"
+    }
+  }
+
+  substitutions = {
+    _MODE = "main"
+  }
 }

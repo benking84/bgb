@@ -27,7 +27,9 @@ class ContactsSource:
             if cursor:
                 page = self._drain(user, sync_token=cursor)
                 if page is None:
-                    warnings.append(f"Contacts sync token for {user} expired; listing the address book")
+                    warnings.append(
+                        f"Contacts sync token for {user} expired; listing the address book"
+                    )
                     people, token = self._full(user)
                     scopes.append(self._scope_full(user, people))
                 else:
@@ -76,9 +78,15 @@ class ContactsSource:
         return people, deleted, sync
 
     def _scope_full(self, user: str, people: list[dict]) -> ScopeScan:
-        return ScopeScan(scope=f"contacts:{user}", mode="full", objects=[self._object(user, person) for person in people])
+        return ScopeScan(
+            scope=f"contacts:{user}",
+            mode="full",
+            objects=[self._object(user, person) for person in people],
+        )
 
-    def _scope_incremental(self, user: str, people: list[dict], deleted: list[str]) -> ScopeScan:
+    def _scope_incremental(
+        self, user: str, people: list[dict], deleted: list[str]
+    ) -> ScopeScan:
         return ScopeScan(
             scope=f"contacts:{user}",
             mode="incremental",

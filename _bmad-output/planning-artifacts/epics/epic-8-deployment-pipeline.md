@@ -93,7 +93,7 @@ release sha-<short sha>  ──►  delivery pipeline "bgb"
 ```
 
 - Terraform creates the targets from a `deploy_targets` map variable. The default map has one entry, `prod`. A later environment adds an entry (project, region, approval flag, parameters) and, if needed, a matching Skaffold profile.
-- Runtime values that differ per target (bucket name, job name, project ID, API token secret) come from target `deployParameters`. Terraform fills them from its own resources, so each value has one source.
+- Runtime values that differ per target (bucket name, job name, project ID, `BGB_OBJECT_RETENTION_DAYS`, the IAP audience `BGB_IAP_AUDIENCE`) come from target `deployParameters`. There is no API token: IAP is mandatory (`epics.md` D7). Terraform fills them from its own resources, so each value has one source.
 - `requireApproval` is off for `prod` while it is the only target, so a merge deploys with no one in the loop. It is a per target flag for later.
 
 ## 6. Stories
@@ -107,7 +107,8 @@ Stories are listed in dependency order.
 **As** the bgb team, **we want** Terraform to create the registry, APIs, service accounts and IAM for the pipeline, **so that** the pipeline can be rebuilt from this repo and keeps working after group editor access ends.
 
 **Acceptance criteria**
-- `terraform apply` enables the Cloud Build, Artifact Registry, Cloud Deploy, IAM Credentials and Container Scanning APIs in `aviato-prod-demo-baby-got-back`, in addition to the APIs already enabled.
+- `terraform apply` enables the Cloud Build, Artifact Registry, Cloud Deploy, IAM Credentials, Container Scanning and Cloud Quotas APIs in `aviato-prod-demo-baby-got-back`, in addition to the APIs already enabled.
+- The runtime service account can read the project's quotas (Cloud Quotas viewer), for `epics.md` Story 10.2's quota pacing.
 - An Artifact Registry Docker repository `bgb` exists in `var.region`.
 - Two service accounts exist, with no keys: `bgb-cloudbuild` (runs builds) and `bgb-deployer` (Cloud Deploy execution). Each has only the roles listed in `CI-CD-SETUP.md`, with a reason for each role, as in the astro-website role table. `bgb-cloudbuild` has `roles/logging.logWriter`.
 - `bgb-deployer` can act as the runtime service account (`roles/iam.serviceAccountUser` on that account only), and can deploy the `bgb` service and `bgb-backup` job.
@@ -171,7 +172,8 @@ Stories are listed in dependency order.
 **Acceptance criteria**
 - Assumption A3 is checked first: a manual release proves Cloud Deploy updates both the `bgb` service and the `bgb-backup` job. The result is recorded in the story notes.
 - Terraform creates delivery pipeline `bgb` and its targets from a `deploy_targets` variable. The default contains only `prod` (project `aviato-prod-demo-baby-got-back`, `var.region`, `requireApproval = false`), running as `bgb-deployer`.
-- `deploy/` contains `skaffold.yaml`, `service.yaml` and `job.yaml`. Every value that differs per environment is a deploy parameter, not a literal. The manifests reproduce the current Terraform runtime settings exactly: port 8080, CPU and memory limits, concurrency 80, timeouts, env vars, runtime service account, job command `python -m bgb run-due`, and `max_retries = 0`.
+- `deploy/` contains `skaffold.yaml`, `service.yaml` and `job.yaml`. Every value that differs per environment is a deploy parameter, not a literal. The manifests reproduce the current Terraform runtime settings exactly: port 8080, CPU and memory limits, concurrency 80, timeouts (job timeout from `job_timeout_hours`), env vars, runtime service account, job command `python -m bgb run-due`, and retries from `job_max_retries` (resume after a timeout depends on them; see `epics.md` Story 10.1).
+- Deploy parameters include `BGB_OBJECT_RETENTION_DAYS` (must equal the bucket retention period) and `BGB_IAP_AUDIENCE` (`epics.md` Stories 4.5 and 5.1). `BGB_CORS_ORIGINS` is development only and is not set.
 - `cloudbuild.yaml` passes the Skaffold config when it creates the release.
 - After the first rollout, `gcloud run services describe bgb` and `gcloud run jobs describe bgb-backup` match their configuration before cutover, except for the image.
 - `CI-CD-SETUP.md` documents adding a second environment as: add a `deploy_targets` entry, add a Skaffold profile if needed, add the stage to the pipeline order. No change to `cloudbuild.yaml`.
@@ -248,5 +250,5 @@ Epic 1 (quality gates) was written before these decisions. It was revised on 202
 
 | ID | Question | Recommendation |
 |---|---|---|
-| Q1 | Should Cloud Deploy also own `BGB_API_TOKEN`, as a Secret Manager reference in the manifest? Epic 1 Story 1.7 wants the pipeline to refuse a public service with no token. | Yes. Add a `bgb-api-token` secret in Story 8.1 and reference it in `service.yaml`. |
-| Q2 | Who extends the Demo project `owner_until` date (2026-11-30), or raises the tier? | Ben to raise it with the landing zone owners before Story 8.1 is applied. |
+| Q1 | Should Cloud Deploy also own `BGB_API_TOKEN`, as a Secret Manager reference in the manifest? | **Decided 2026-10-31 (Ben): no token at all.** IAP is mandatory and the app token is removed (`epics.md` D7), so there is no secret. Epic 1 Story 1.7 now checks that IAP is on and the service is not public. |
+| Q2 | Who extends the Demo project `owner_until` date (2026-11-30), or raises the tier? | **Decided 2026-10-31: Ben gets `owner_until` extended** with the landing zone owners before 2026-11-30 and before Story 8.1 is applied (`epics.md` D10). |
