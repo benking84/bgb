@@ -76,7 +76,7 @@ Create the GCP project yourself. Terraform does not create it. Ownership is spli
 - **Cloud Build and Cloud Deploy own the image and runtime configuration.** A merge to `main` builds the image, pushes it tagged by commit SHA and creates a Cloud Deploy release that references the image by digest. Runtime settings live in `deploy/`. Terraform ignores the service and job templates after creation.
 - **Running `terraform apply -var image=...` by hand is bootstrap only.** The image is used when the service and job are first created. Later images are deployed by the pipeline, not by Terraform.
 
-The pipeline, rollback, manual fallback and cutover steps are in [CI-CD-SETUP.md](CI-CD-SETUP.md).
+The pipeline, rollback and cutover steps are in [CI-CD-SETUP.md](CI-CD-SETUP.md).
 
 Terraform state is kept in a versioned, private Cloud Storage bucket (`terraform/main.tf`, `backend "gcs"`). Create it once before the first `init`:
 
@@ -131,7 +131,7 @@ The Firestore `(default)` database can only be created once per project. If it a
 terraform -chdir=terraform import google_firestore_database.default projects/$PROJECT/databases/'(default)'
 ```
 
-After apply, authorize domain-wide delegation for `bgb-delegate` and open the service URL. The service requires authentication unless `allow_unauthenticated=true`. If you use a JSON key instead of keyless delegation, add it as a version of `bgb-workspace-sa`.
+After apply, authorize domain-wide delegation for `bgb-delegate` and open the service URL. The service is never public: its ingress is load-balancer only (Aviato org policy) and users reach it at `console_hostname` through IAP. If you use a JSON key instead of keyless delegation, add it as a version of `bgb-workspace-sa`.
 
 | Variable | Meaning |
 | --- | --- |
@@ -141,7 +141,8 @@ After apply, authorize domain-wide delegation for `bgb-delegate` and open the se
 | `image` | Bootstrap Cloud Run image, used only at first creation. Cloud Deploy owns the image afterwards |
 | `firestore_location` | Firestore location (default `australia-southeast1`; it can never be changed after creation) |
 | `kms_key_name` | Optional CMEK key for the bucket |
-| `allow_unauthenticated` | When true, the UI service is public |
+| `console_hostname` | DNS name for the console behind the HTTPS load balancer and IAP (required) |
+| `console_access_group` | Group allowed through IAP (default `bgb-admins@aviato.consulting`) |
 | `backup_project_id` | Optional separate project for the bucket (default: `project_id`) |
 | `object_retention_days` | Bucket retention period in days (default 30; 0 turns it off) |
 | `lock_retention` | Lock the retention policy permanently (default false; irreversible) |

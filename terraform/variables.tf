@@ -24,11 +24,6 @@ variable "image" {
   default     = "us-docker.pkg.dev/cloudrun/container/hello"
 }
 
-variable "allow_unauthenticated" {
-  type    = bool
-  default = false
-}
-
 variable "kms_key_name" {
   type        = string
   description = "Optional Cloud KMS key for the backup bucket, as projects/PROJECT/locations/LOCATION/keyRings/RING/cryptoKeys/KEY. Empty uses Google-managed encryption."
@@ -88,10 +83,15 @@ variable "deploy_stage_order" {
   default     = ["prod"]
 }
 
-variable "iap_audience" {
+variable "console_hostname" {
   type        = string
-  description = "IAP audience the service validates (BGB_IAP_AUDIENCE). Empty until IAP is set up (Story 5.1)."
-  default     = ""
+  description = "DNS name of the admin console, served by the external HTTPS load balancer with IAP. Point an A record at the console_ip output; the Google-managed certificate provisions once it resolves."
+}
+
+variable "console_access_group" {
+  type        = string
+  description = "Google group allowed through IAP to the console (epics.md D7, D8)."
+  default     = "bgb-admins@aviato.consulting"
 }
 
 variable "github_connection_name" {

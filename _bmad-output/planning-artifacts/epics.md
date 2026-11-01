@@ -24,6 +24,8 @@ Epic 1 (pipeline and quality gates) is owned by a separate document. Epics here 
 
 **Decision IDs:** other documents cite these as "`epics.md` D1" and so on. Epic 1 and Epic 9 have their own D-numbers; inside those files a bare "D3" means that file's decision.
 
+**D12 (2026-11-01, Ben):** deployment uses only Terraform and managed Google Cloud services (Cloud Build, Cloud Deploy). No workstation deploy scripts or manual `gcloud` release paths; `scripts/dev.sh` and the manual fallback section were removed. The console's load balancer and IAP are Terraform (`terraform/console.tf`).
+
 ## Requirements Inventory
 
 ### Functional Requirements

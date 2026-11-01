@@ -169,7 +169,7 @@ Manifests use `{{.KEY}}` placeholders. Terraform fills each from `local.base_dep
 | UI_SERVICE_ACCOUNT | `bgb-ui` email | service |
 | RUNTIME_SERVICE_ACCOUNT | `bgb-run` email | job |
 | BGB_OBJECT_RETENTION_DAYS | `object_retention_days` (must equal the bucket retention period) | job |
-| BGB_IAP_AUDIENCE | `iap_audience` | service |
+| BGB_IAP_AUDIENCE | computed from the console backend service (`terraform/console.tf`) | service |
 | JOB_TIMEOUT_SECONDS | `job_timeout_hours` times 3600 | job |
 | JOB_MAX_RETRIES | `job_max_retries` | job |
 
@@ -265,33 +265,12 @@ After a rollback:
 
 Unverified: whether the rollback targets the previous successful release in every state (for example after a failed rollout), and whether `requireApproval` or a rollout still in progress changes the behaviour.
 
-## Manual fallback deploy
+## Redeploying a known-good build
 
-Use this only if the Cloud Build main path is unavailable and a release must go out.
+Every release goes through Cloud Build and Cloud Deploy. There is no workstation deploy path (`epics.md` D12).
 
-Warning: a manual release skips the PR tests and the branch protection gate. Only deploy an image that was built from a commit whose `bgb-pr` check passed. The image must be given as a `@sha256:` digest, never as a tag and never as `latest`.
-
-1. Find the digest of an image already pushed for the commit:
-
-   ```
-   gcloud artifacts docker images describe \
-     REGION-docker.pkg.dev/PROJECT/bgb/bgb:COMMIT_SHA \
-     --format='value(image_summary.digest)'
-   ```
-
-2. From a checkout of that same commit (so `deploy/` matches the image), create the release with a unique name:
-
-   ```
-   gcloud deploy releases create manual-YYYYMMDD-HHMM \
-     --delivery-pipeline=bgb --region=REGION --project=PROJECT \
-     --source=deploy \
-     --images=bgb=REGION-docker.pkg.dev/PROJECT/bgb/bgb@sha256:DIGEST \
-     --annotations="commit-sha=COMMIT_SHA,manual=true"
-   ```
-
-3. Check the live release as described above, then record why the fallback was used.
-
-Unverified: this has not been run. The caller needs `roles/clouddeploy.releaser` and permission to act as `bgb-deployer`.
+- To go back to an earlier release, use Cloud Deploy rollback (see Rollback above) in the console or with the documented command.
+- To rebuild and release a specific commit, re-run the `bgb-main` trigger for that commit from the Cloud Build console (Triggers, `bgb-main`, Run), so it passes the same build steps and creates a release with the same annotations.
 
 ## Troubleshooting the first build
 
@@ -306,7 +285,7 @@ Unverified: this has not been run. The caller needs `roles/clouddeploy.releaser`
 | `guard-release` fails on main | `_MODE` or `$BRANCH_NAME` is not `main`. Check the trigger substitution and branch filter. |
 | `read-digest` fails | `docker inspect` returned no `RepoDigests` entry after the push. Check that `build-image` pushed. |
 | `create-release` fails with permission denied | Missing grant for `bgb-cloudbuild` or `bgb-deployer`. Compare against the service account table, and check whether the Cloud Deploy service agent needs `roles/iam.serviceAccountUser` on `bgb-deployer`. |
-| `create-release` fails with already exists | A release `sha-SHORT_SHA` exists for this commit. Merge a new commit or use the manual fallback with a new name. |
+| `create-release` fails with already exists | A release `sha-SHORT_SHA` exists for this commit. Release names are unique per commit, so merge a new commit to release again. |
 | Release renders but the rollout fails | Check that the placeholders in `deploy/` have parameter values, the deployer can read the artifacts bucket and the image, and the service accounts exist. |
 | Rollout succeeds but the job still runs the old image | The A3 assumption failed. Use the post-deploy hook fallback (`gcloud run jobs update`). |
 | `terraform plan` shows drift after a rollout | Add the drifting fields (labels, annotations, traffic) to `ignore_changes`. |
@@ -356,7 +335,7 @@ Recorded by: not yet recorded. Date: not yet recorded.
 - Story 8.5: pytest, ruff and the Docker build were not run in the implementing session (shell access was denied). Run `uv run --extra dev pytest tests/test_cloudbuild.py tests/test_deploy_manifests.py` and the ruff checks.
 - Story 8.5: the image tag `cloud-sdk:502.0.0-slim`, the `--annotations` flag, `docker inspect` returning a `RepoDigests` entry after push, and the Dockerfile uv stage (venv path portability to the runtime stage) were not verified. Confirm on the first main build.
 - Story 8.5: the guard uses `$BRANCH_NAME`, which Cloud Build sets for push triggers. Confirm it is `main` on the first build.
-- Story 8.6: the rollback command, the `gcloud builds triggers run` and `gcloud deploy targets describe` outputs, the `--format` expressions and the manual fallback commands were written from memory of the gcloud CLI and not run. The rollback has not been tested.
+- Story 8.6: the rollback command, the `gcloud builds triggers run` and `gcloud deploy targets describe` outputs, and the `--format` expressions were written from memory of the gcloud CLI and not run. The rollback has not been tested.
 - Artifact Registry: the KEEP policy keeps the 20 newest versions of any tag state, because the provider does not allow a tag filter on `most_recent_versions`. Tagged versions older than 30 days are deleted unless they are among the newest 20.
 - If a repository named `bgb` already exists in the project, import it before the first apply: `terraform import google_artifact_registry_repository.bgb projects/PROJECT/locations/REGION/repositories/bgb`.
 - A fresh apply uses the bootstrap image, which has no `python`, so the scheduled job fails until the first release. This is accepted.

@@ -67,3 +67,17 @@ output "pr_trigger" {
 output "main_trigger" {
   value = google_cloudbuild_trigger.main.name
 }
+
+output "console_ip" {
+  description = "Point an A record for console_hostname at this address."
+  value       = google_compute_global_address.console.address
+}
+
+output "console_url" {
+  value = "https://${var.console_hostname}"
+}
+
+output "iap_audience" {
+  description = "BGB_IAP_AUDIENCE: the audience in IAP's signed header."
+  value       = local.iap_audience
+}
