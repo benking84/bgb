@@ -216,7 +216,9 @@ resource "google_secret_manager_secret_iam_member" "workspace_sa" {
 resource "google_cloud_run_v2_service" "ui" {
   name     = "bgb"
   location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  # Aviato org policy run.allowedIngress allows only internal-and-cloud-load-balancing.
+  # Users reach the console through an external HTTPS load balancer with IAP (Story 5.2).
+  ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   template {
     service_account                  = google_service_account.ui.email
     timeout                          = "3600s"

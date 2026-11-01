@@ -953,6 +953,8 @@ So that nobody can read backed-up mail or delete jobs by reaching the service di
 
 **Covers:** Additional requirement: IAP
 
+**Constraint (2026-11-01):** Aviato org policy `run.allowedIngress` allows only `internal-and-cloud-load-balancing`, and the service is deployed that way. IAP must therefore sit on an external HTTPS load balancer with a serverless NEG in front of the service, which needs a static IP, a DNS name and a managed certificate. Pick the hostname before this story starts.
+
 As a backup admin,
 I want the console behind Google sign-in, always,
 So that only approved Aviato staff can open it.
@@ -962,6 +964,7 @@ So that only approved Aviato staff can open it.
 **Given** the Terraform for the UI service
 **When** it is applied
 **Then** IAP fronts the service, the IAP service agent can invoke it, and access is granted to `bgb-admins@aviato.consulting` (a Terraform variable with that default)
+**And** IAP is enabled on the load balancer's backend service (external HTTPS load balancer, serverless NEG, static IP, Google-managed certificate for the chosen hostname), and `BGB_IAP_AUDIENCE` is that backend service's audience
 
 **Given** the Terraform variables
 **When** they are read

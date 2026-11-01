@@ -4,6 +4,9 @@ apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
   name: bgb
+  annotations:
+    # Required by Aviato org policy run.allowedIngress; must match terraform/main.tf.
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
 spec:
   template:
     spec:

@@ -91,4 +91,13 @@ def test_every_placeholder_has_a_terraform_parameter():
 def test_no_hard_coded_environment_values():
     for text in (SERVICE, JOB, SKAFFOLD):
         assert "aviato" not in text
-        assert not re.search(r"australia-southeast1|us-central1|@.*\.iam\.gserviceaccount\.com", text)
+        assert not re.search(
+            r"australia-southeast1|us-central1|@.*\.iam\.gserviceaccount\.com", text
+        )
+
+
+def test_service_ingress_matches_org_policy():
+    service = (ROOT / "deploy" / "service.yaml").read_text()
+    main = (ROOT / "terraform" / "main.tf").read_text()
+    assert "run.googleapis.com/ingress: internal-and-cloud-load-balancing" in service
+    assert 'ingress = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"' in main
