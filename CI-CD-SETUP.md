@@ -126,7 +126,7 @@ Checks in `pr` mode, in order: `validate-mode` (fails on any `_MODE` other than 
 
 | Builder image | Why this image and version |
 | --- | --- |
-| ghcr.io/astral-sh/uv:0.13.6-python3.12-bookworm-slim | uv 0.13.6 is the version used locally. Python 3.12 matches the Dockerfile runtime. |
+| ghcr.io/astral-sh/uv:0.13.6-python3.12-trixie-slim | uv 0.13.6 is the version used locally. Python 3.12 matches the Dockerfile runtime. |
 | node:22.12.0-bookworm-slim | Node 22 matches the Dockerfile web stage. |
 | hashicorp/terraform:1.14.6 | Terraform 1.14.6 is the version used locally and satisfies `required_version`. |
 | gcr.io/cloud-builders/docker:24.0.9 | Google's maintained Docker builder. Builds the image on PRs and builds, pushes and reads the digest on main. |
@@ -149,7 +149,7 @@ Two merges close together: both builds push and create a release (names differ b
 
 | Builder image | Why this image and version |
 | --- | --- |
-| gcr.io/google.com/cloudsdktool/cloud-sdk:502.0.0-slim | Pinned Google Cloud SDK, which includes `gcloud deploy`. Used only to create the release. |
+| gcr.io/google.com/cloudsdktool/google-cloud-cli:591.0.0-slim | Pinned Google Cloud SDK, which includes `gcloud deploy`. Used only to create the release. |
 
 ## Cloud Deploy pipeline and manifests
 
@@ -333,7 +333,7 @@ Recorded by: not yet recorded. Date: not yet recorded.
 - Story 8.4: Cloud Deploy may add labels, annotations or traffic settings to the service and job. If `terraform plan` shows drift after a rollout, add those fields to `ignore_changes`.
 - Story 8.5: `bgb-cloudbuild` needs no further roles to create a release. Confirm on the first main build.
 - Story 8.5: pytest, ruff and the Docker build were not run in the implementing session (shell access was denied). Run `uv run --extra dev pytest tests/test_cloudbuild.py tests/test_deploy_manifests.py` and the ruff checks.
-- Story 8.5: the image tag `cloud-sdk:502.0.0-slim`, the `--annotations` flag, `docker inspect` returning a `RepoDigests` entry after push, and the Dockerfile uv stage (venv path portability to the runtime stage) were not verified. Confirm on the first main build.
+- Story 8.5: the `--annotations` flag, `docker inspect` returning a `RepoDigests` entry after push, and the Dockerfile uv stage (venv path portability to the runtime stage) were not verified. Confirm on the first main build.
 - Story 8.5: the guard uses `$BRANCH_NAME`, which Cloud Build sets for push triggers. Confirm it is `main` on the first build.
 - Story 8.6: the rollback command, the `gcloud builds triggers run` and `gcloud deploy targets describe` outputs, and the `--format` expressions were written from memory of the gcloud CLI and not run. The rollback has not been tested.
 - Artifact Registry: the KEEP policy keeps the 20 newest versions of any tag state, because the provider does not allow a tag filter on `most_recent_versions`. Tagged versions older than 30 days are deleted unless they are among the newest 20.
